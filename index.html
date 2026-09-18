@@ -1,0 +1,2690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RISC-V 工具箱 · 位操作 / 寄存器 / 指令 / 异常中断 / 虚拟地址 / CSR / PTE / PMP / CSR 指令</title>
+<style>
+/* ============================================================
+   全局基础
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    min-height: 100vh;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(145deg, #f6f9fc 0%, #e9f0f8 100%);
+    padding: 22px 18px 56px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+   主布局
+   ============================================================ */
+.shell {
+    display: flex;
+    gap: 24px;
+    max-width: 1180px;
+    margin: 0 auto;
+    align-items: flex-start;
+}
+.sidebar {
+    flex: 0 0 200px;
+    position: sticky;
+    top: 22px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    border-radius: 22px;
+    box-shadow: 0 16px 40px -18px rgba(0, 30, 60, 0.28), 0 4px 12px -4px rgba(0, 0, 0, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.menu-btn {
+    border: none;
+    background: transparent;
+    padding: 11px 14px;
+    border-radius: 14px;
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #4a5b7a;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 0.18s, color 0.18s, box-shadow 0.18s, transform 0.12s;
+    user-select: none;
+}
+.menu-btn:hover { background: rgba(59, 124, 255, 0.09); color: #1a3a6c; }
+.menu-btn:active { transform: scale(0.98); }
+.menu-btn.active {
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    color: #fff;
+    box-shadow: 0 10px 22px -10px rgba(59, 124, 255, 0.85);
+}
+.main { flex: 1 1 auto; min-width: 0; }
+
+@media (max-width: 720px) {
+    .shell { flex-direction: column; gap: 16px; }
+    .sidebar {
+        position: static;
+        flex-direction: row;
+        width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 8px;
+    }
+    .sidebar::-webkit-scrollbar { display: none; }
+    .menu-btn { flex: 0 0 auto; text-align: center; padding: 10px 14px; font-size: 13px; }
+}
+
+/* ============================================================
+   面板容器
+   ============================================================ */
+.panel { display: none; }
+.panel.active {
+    display: block;
+    animation: panelIn 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes panelIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   统一卡片样式
+   ============================================================ */
+.card {
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-radius: 28px;
+    padding: 28px 26px 24px;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 24px 50px -20px rgba(0, 20, 40, 0.22), 0 8px 24px -6px rgba(0, 0, 0, 0.05);
+}
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.card-header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0;
+}
+.card-header .badge {
+    background: rgba(59, 124, 255, 0.12);
+    color: #1a3a8a;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 40px;
+    letter-spacing: 0.3px;
+    border: 1px solid rgba(59, 124, 255, 0.15);
+}
+.card-note {
+    color: #4a5b7a;
+    font-size: 14px;
+    line-height: 1.7;
+    margin-bottom: 20px;
+    border-left: 4px solid #3b7cff;
+    background: rgba(59, 124, 255, 0.06);
+    border-radius: 0 12px 12px 0;
+    padding: 10px 16px;
+}
+.card-note code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12.5px;
+    color: #1e293b;
+}
+.card-note b { color: #1a3a8a; }
+
+/* ============================================================
+   统一输入行 + 按钮
+   ============================================================ */
+.input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.input-row label {
+    font-weight: 600;
+    font-size: 14px;
+    color: #1e293b;
+    white-space: nowrap;
+    min-width: 70px;
+}
+.input-row input {
+    flex: 1 1 220px;
+    min-width: 140px;
+    padding: 12px 16px;
+    border: 2px solid #dce3ed;
+    border-radius: 14px;
+    background: #fff;
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 15px;
+    color: #0f1a2e;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-row input:focus {
+    border-color: #3b7cff;
+    box-shadow: 0 0 0 4px rgba(59, 124, 255, 0.12);
+}
+.input-row input::placeholder { color: #9aabbf; font-size: 13.5px; }
+
+.btn-primary {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 14.5px;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    box-shadow: 0 10px 22px -12px rgba(59, 124, 255, 0.9);
+    transition: filter 0.18s, transform 0.12s;
+    white-space: nowrap;
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:active { transform: scale(0.97); }
+
+.quick-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    background: rgba(59, 124, 255, 0.05);
+    border: 1px solid rgba(59, 124, 255, 0.15);
+    border-radius: 16px;
+}
+.quick-row::before {
+    content: '⚡ 快速选择';
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #3b7cff;
+    display: block;
+    width: 100%;
+    margin-bottom: 4px;
+}
+.quick-row span {
+    background: rgba(255, 255, 255, 0.85);
+    padding: 4px 12px;
+    border-radius: 40px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12.5px;
+    color: #1a3a8a;
+    border: 1px solid rgba(59, 124, 255, 0.22);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+    font-weight: 600;
+}
+.quick-row span:hover {
+    background: #fff;
+    border-color: #3b7cff;
+    box-shadow: 0 4px 12px -4px rgba(59, 124, 255, 0.4);
+    transform: translateY(-1px);
+}
+
+/* ============================================================
+   统一字段表格
+   ============================================================ */
+.field-table {
+    border: 1px solid rgba(59, 124, 255, 0.15);
+    border-radius: 18px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.6);
+    margin-bottom: 14px;
+}
+.field-head {
+    display: grid;
+    grid-template-columns: 90px 140px 150px 1fr;
+    gap: 10px;
+    padding: 10px 16px;
+    background: rgba(59, 124, 255, 0.08);
+    border-bottom: 1px solid rgba(59, 124, 255, 0.15);
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #3b7cff;
+}
+.field-row {
+    display: grid;
+    grid-template-columns: 90px 140px 150px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    transition: background 0.15s;
+}
+.field-row:last-child { border-bottom: none; }
+.field-row:hover { background: rgba(59, 124, 255, 0.03); }
+.field-row[data-zero="0"] {
+    background: linear-gradient(90deg, rgba(59, 124, 255, 0.08), rgba(59, 124, 255, 0.01));
+}
+.field-row[data-zero="0"] .field-range {
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    color: #fff;
+    box-shadow: 0 4px 10px -4px rgba(59, 124, 255, 0.7);
+}
+.field-row[data-zero="0"] .field-name { color: #1a3a8a; }
+.field-row[data-zero="0"] .field-value { color: #0f1a2e; font-weight: 800; }
+.field-row[data-reserved="1"] { opacity: 0.6; }
+
+.field-range {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #1a3a8a;
+    background: rgba(59, 124, 255, 0.1);
+    padding: 3px 10px;
+    border-radius: 8px;
+    text-align: center;
+    white-space: nowrap;
+    justify-self: start;
+    transition: all 0.15s;
+}
+.field-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    word-break: break-word;
+}
+.field-value {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #64748b;
+    word-break: break-all;
+    line-height: 1.35;
+}
+.field-desc {
+    font-size: 12.5px;
+    color: #64748b;
+    line-height: 1.5;
+}
+.field-enum {
+    display: inline-block;
+    background: rgba(59, 124, 255, 0.14);
+    color: #1a3a8a;
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 1px 8px;
+    border-radius: 40px;
+    margin-left: 4px;
+    font-family: 'Inter', sans-serif;
+}
+
+/* ============================================================
+   统一结果区
+   ============================================================ */
+.result-empty, .result-error {
+    padding: 30px 20px;
+    text-align: center;
+    border-radius: 20px;
+    font-size: 14.5px;
+}
+.result-empty {
+    background: rgba(59, 124, 255, 0.05);
+    color: #64748b;
+    border: 1px dashed rgba(59, 124, 255, 0.3);
+}
+.result-error {
+    background: rgba(255, 235, 235, 0.75);
+    color: #b91c1c;
+    border: 1px solid rgba(220, 80, 80, 0.25);
+}
+
+.value-box {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 6px 14px;
+    background: rgba(59, 124, 255, 0.06);
+    border: 1px solid rgba(59, 124, 255, 0.18);
+    border-radius: 18px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+}
+.value-box .vb-row { display: contents; }
+.value-box .vb-k {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 700;
+    color: #3b7cff;
+    display: flex;
+    align-items: center;
+}
+.value-box .vb-v {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f1a2e;
+    word-break: break-all;
+    line-height: 1.4;
+}
+.value-box .vb-v.sm {
+    font-size: 12.5px;
+    letter-spacing: 0.5px;
+    color: #1a3a8a;
+    font-weight: 600;
+}
+
+.result-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid rgba(59, 124, 255, 0.18);
+}
+.result-head .rh-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 22px;
+    font-weight: 800;
+    color: #1a3a8a;
+    letter-spacing: 0.3px;
+}
+.result-head .rh-title { font-size: 14px; color: #64748b; font-weight: 500; }
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px 16px;
+    background: rgba(59, 124, 255, 0.06);
+    border: 1px solid rgba(59, 124, 255, 0.18);
+    border-radius: 20px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+.summary-grid .sg-item { display: flex; flex-direction: column; gap: 2px; }
+.summary-grid .sg-item .k {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    color: #3b7cff;
+}
+.summary-grid .sg-item .v {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #0f1a2e;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.warn-box {
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    border-left: 4px solid #f59e0b;
+    color: #92400e;
+    font-size: 13.5px;
+    line-height: 1.6;
+    padding: 12px 16px;
+    border-radius: 0 14px 14px 0;
+    margin-bottom: 16px;
+}
+.warn-box code {
+    background: rgba(0, 0, 0, 0.07);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12.5px;
+}
+
+/* ============================================================
+   寄存器面板结果
+   ============================================================ */
+.reg-out {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 26px;
+    font-weight: 500;
+    color: #0f1a2e;
+    min-height: 80px;
+    padding: 18px 16px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(59, 124, 255, 0.15);
+    border-radius: 20px;
+}
+.reg-out.err {
+    background: rgba(255, 235, 235, 0.75);
+    border-color: rgba(220, 80, 80, 0.25);
+    color: #b91c1c;
+    font-size: 16px;
+    font-family: inherit;
+}
+.reg-out .input-val {
+    color: #4a5b7a;
+    font-weight: 400;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 2px 14px;
+    border-radius: 40px;
+    font-size: 22px;
+}
+.reg-out .arrow { color: #94a3b8; font-size: 24px; font-weight: 300; }
+.reg-out .highlight {
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 600;
+    font-size: 28px;
+}
+.reg-out .alias {
+    font-size: 16px;
+    color: #64748b;
+    font-weight: 400;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 2px 12px;
+    border-radius: 40px;
+}
+.reg-out .tag {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    padding: 2px 12px;
+    border-radius: 40px;
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+}
+
+/* ============================================================
+   异常/中断表格
+   ============================================================ */
+.trap-tables {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 22px;
+}
+@media (max-width: 760px) { .trap-tables { grid-template-columns: 1fr; } }
+.trap-table-wrap {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(59, 124, 255, 0.18);
+    border-radius: 20px;
+    padding: 14px 14px 6px;
+}
+.trap-table-wrap h3 {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.trap-table-wrap h3 .mini {
+    font-size: 11px;
+    font-weight: 500;
+    color: #94a3b8;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.trap-table-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.trap-table-wrap thead th {
+    text-align: left;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #94a3b8;
+    font-weight: 600;
+    padding: 4px 6px 6px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+}
+.trap-table-wrap tbody td {
+    padding: 8px 6px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    vertical-align: top;
+}
+.trap-table-wrap tbody tr:last-child td { border-bottom: none; }
+.trap-table-wrap tbody tr { transition: background 0.15s; cursor: pointer; }
+.trap-table-wrap tbody tr:hover { background: rgba(59, 124, 255, 0.07); }
+.code-cell {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    color: #1a3a8a;
+    white-space: nowrap;
+    width: 52px;
+}
+.trap-name { font-weight: 600; color: #1e293b; font-size: 13px; line-height: 1.35; }
+.trap-desc { font-size: 12px; color: #7a8ba0; line-height: 1.4; margin-top: 2px; }
+.trap-empty { padding: 18px 6px; text-align: center; color: #9aabbf; font-size: 13px; }
+
+.cause-result {
+    margin-top: 14px;
+    min-height: 64px;
+    border-radius: 20px;
+    padding: 16px 20px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 19px;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(59, 124, 255, 0.18);
+    color: #0f1a2e;
+}
+.cause-result.show { display: flex; }
+.cause-result.err {
+    background: rgba(255, 235, 235, 0.75);
+    border-color: rgba(220, 80, 80, 0.25);
+    color: #b91c1c;
+    font-size: 15px;
+    font-family: inherit;
+}
+.cause-type {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: inherit;
+    padding: 3px 14px;
+    border-radius: 40px;
+    letter-spacing: 0.3px;
+    color: #fff;
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+}
+.cause-code { color: #64748b; font-size: 16px; }
+.cause-name { font-weight: 700; color: #0f1a2e; font-size: 19px; }
+.cause-desc { font-family: inherit; font-size: 13px; color: #64748b; flex-basis: 100%; line-height: 1.5; }
+
+/* ============================================================
+   虚拟地址专用
+   ============================================================ */
+.vm-mode-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.mode-btn {
+    flex: 1 1 0;
+    min-width: 76px;
+    padding: 12px 16px;
+    border: 2px solid rgba(59, 124, 255, 0.2);
+    background: rgba(255, 255, 255, 0.75);
+    border-radius: 16px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: #1a3a8a;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+.mode-btn:hover { border-color: #3b7cff; background: rgba(59, 124, 255, 0.08); }
+.mode-btn:active { transform: scale(0.97); }
+.mode-btn.active {
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 10px 22px -12px rgba(59, 124, 255, 0.95);
+}
+
+.lv-bits {
+    display: inline-flex;
+    align-items: stretch;
+    margin-left: auto;
+    border-radius: 10px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    color: #fff;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    box-shadow: 0 6px 16px -6px rgba(59, 124, 255, 0.75), 0 2px 4px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.lv-bits > span { display: flex; align-items: center; padding: 6px 11px; line-height: 1; }
+.lv-bits-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: rgba(0, 0, 0, 0.2);
+}
+.lv-bits-range { font-size: 15.5px; font-weight: 800; letter-spacing: 0.8px; }
+.lv-bits-width { font-size: 11px; font-weight: 700; letter-spacing: 0.3px; background: rgba(0, 0, 0, 0.2); }
+
+.vm-level {
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(59, 124, 255, 0.22);
+    border-radius: 18px;
+    padding: 14px 18px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 14px -10px rgba(59, 124, 255, 0.5);
+}
+.vm-level-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed rgba(59, 124, 255, 0.28);
+}
+.vm-level .lv-tag {
+    background: linear-gradient(135deg, #1a3a8a, #3b7cff);
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 40px;
+    letter-spacing: 0.4px;
+}
+.vm-level .lv-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 17px;
+    font-weight: 700;
+    color: #1a3a8a;
+}
+.vm-level .lv-root-flag {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #9a3412;
+    background: rgba(251, 146, 60, 0.22);
+    border: 1px solid rgba(251, 146, 60, 0.5);
+    padding: 4px 11px;
+    border-radius: 40px;
+}
+.vm-level-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px 18px;
+}
+.vm-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vm-field .k {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    color: #94a3b8;
+}
+.vm-field .v {
+    font-size: 14px;
+    color: #0f1a2e;
+    font-weight: 500;
+    word-break: break-all;
+    line-height: 1.4;
+}
+.vm-field .v.mono {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-weight: 600;
+    color: #1a3a8a;
+}
+.vm-note {
+    margin-top: 14px;
+    font-size: 12.5px;
+    color: #64748b;
+    line-height: 1.6;
+    background: rgba(0, 0, 0, 0.025);
+    border-radius: 14px;
+    padding: 10px 16px;
+}
+.vm-note code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    background: rgba(59, 124, 255, 0.12);
+    color: #1a3a8a;
+    padding: 1px 7px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* ============================================================
+   位操作专用
+   ============================================================ */
+.bit-display {
+    background: #f8fafc;
+    border-radius: 14px;
+    padding: 16px 18px 12px;
+    margin-bottom: 20px;
+    border: 1px solid #e9edf2;
+}
+.bit-display-row {
+    display: flex;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px dashed #e2e8f0;
+}
+.bit-display-row:last-child { border-bottom: none; }
+.bit-display-row .lbl {
+    font-weight: 700;
+    font-size: 15px;
+    width: 66px;
+    flex-shrink: 0;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.bit-display-row .lbl .dot { width: 9px; height: 9px; border-radius: 3px; }
+.dot-hex { background: #3b7cff; }
+.dot-dec { background: #60a5fa; }
+.dot-bin { background: #1a3a8a; }
+.bit-display-row .val {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 17px;
+    font-weight: 600;
+    background: #fff;
+    padding: 6px 14px;
+    border-radius: 10px;
+    border: 1px solid #d1d9e6;
+    color: #0b1e33;
+    flex: 1;
+    min-width: 0;
+    word-break: break-all;
+}
+.bit-display-row .val.bin { font-size: 14px; letter-spacing: 0.6px; }
+
+.bit-grid { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.bit-row { display: flex; justify-content: space-between; gap: 4px; }
+.bit-group {
+    display: flex;
+    gap: 4px;
+    background: #eef1f5;
+    padding: 4px 6px;
+    border-radius: 8px;
+    flex: 1;
+    justify-content: center;
+}
+.bit-cell { display: flex; flex-direction: column; align-items: center; width: clamp(22px, 2.6vw + 6px, 38px); flex-shrink: 0; }
+.bit-label { font-size: 10px; color: #6c7a8a; margin-bottom: 2px; font-weight: 600; user-select: none; }
+.bit-val {
+    width: 100%;
+    aspect-ratio: 1/1;
+    background: #d5dbe3;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(13px, 1.4vw + 6px, 19px);
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s, border-color 0.15s;
+    user-select: none;
+    color: #1e2a3a;
+    border: 2px solid transparent;
+}
+.bit-val:hover { transform: scale(1.05); border-color: #8a9aa8; }
+.bit-val:active { transform: scale(0.95); }
+.bit-val.one { background: #3b7cff; color: #fff; border-color: #1a3a8a; }
+.bit-val.zero { background: #d5dbe3; color: #1e2a3a; border-color: #b0bec5; }
+
+/* ============================================================
+   响应式
+   ============================================================ */
+@media (max-width: 760px) {
+    .field-head { display: none; }
+    .field-row {
+        grid-template-columns: 80px 1fr auto;
+        gap: 6px 10px;
+        padding: 11px 12px;
+    }
+    .field-desc { grid-column: 2 / -1; font-size: 12px; margin-top: 2px; }
+    .field-value { text-align: right; }
+    .value-box { grid-template-columns: 60px 1fr; }
+}
+@media (max-width: 700px) {
+    .bit-display-row .val { font-size: 14px; padding: 5px 10px; }
+    .bit-display-row .val.bin { font-size: 12px; }
+    .bit-display-row .lbl { font-size: 13px; width: 56px; }
+}
+@media (max-width: 520px) {
+    .card { padding: 20px 16px 18px; border-radius: 24px; }
+    .card-header h1 { font-size: 20px; }
+    .card-note { font-size: 13px; padding: 9px 12px; }
+    .field-range { font-size: 11.5px; padding: 2px 7px; }
+    .field-name { font-size: 12.5px; }
+    .field-value { font-size: 12.5px; }
+    .value-box .vb-v { font-size: 13px; }
+    .value-box .vb-v.sm { font-size: 11px; }
+    .result-head .rh-name { font-size: 19px; }
+    .vm-level { padding: 12px 14px 14px; }
+    .vm-level .lv-name { font-size: 15px; }
+    .vm-field .v { font-size: 13px; }
+    .summary-grid .sg-item .v { font-size: 13px; }
+    .lv-bits > span { padding: 5px 9px; }
+    .lv-bits-range { font-size: 14px; }
+    .lv-bits-label, .lv-bits-width { font-size: 9.5px; }
+    .bit-val { border-radius: 4px; }
+    .bit-label { font-size: 7px; }
+    .bit-group { padding: 2px 3px; gap: 2px; }
+    .bit-row { gap: 2px; }
+    .reg-out { font-size: 20px; }
+    .reg-out .input-val { font-size: 17px; }
+    .reg-out .highlight { font-size: 22px; }
+    .reg-out .arrow { font-size: 18px; }
+    .reg-out .alias { font-size: 14px; }
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+    <!-- ================= 左侧菜单栏 ================= -->
+    <nav class="sidebar" role="tablist" aria-label="工具切换">
+        <button class="menu-btn active" data-target="panel-bits"   role="tab" aria-selected="true">🔢 64-bit 位操作</button>
+        <button class="menu-btn"        data-target="panel-reg"    role="tab" aria-selected="false">🧩 寄存器 &amp; CSR</button>
+        <button class="menu-btn"        data-target="panel-codec"  role="tab" aria-selected="false">⚙️ 指令编解码</button>
+        <button class="menu-btn"        data-target="panel-trap"   role="tab" aria-selected="false">🚨 异常 &amp; 中断</button>
+        <button class="menu-btn"        data-target="panel-vm"     role="tab" aria-selected="false">🗺️ 虚拟地址</button>
+        <button class="menu-btn"        data-target="panel-csr"    role="tab" aria-selected="false">📋 CSR 字段展开</button>
+        <button class="menu-btn"        data-target="panel-pte"    role="tab" aria-selected="false">📄 PTE 解析</button>
+        <button class="menu-btn"        data-target="panel-pmp"    role="tab" aria-selected="false">🔒 PMP 属性</button>
+        <button class="menu-btn"        data-target="panel-csrop"  role="tab" aria-selected="false">🔧 CSR 指令识别</button>
+    </nav>
+
+    <!-- ================= 主内容区 ================= -->
+    <main class="main">
+
+        <!-- ============================================================
+             面板 1：64-bit 位操作
+             ============================================================ -->
+        <section id="panel-bits" class="panel active" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>🔢 64-bit 位操作</h1>
+                    <span class="badge">Bit Manipulation</span>
+                </div>
+
+                <div class="bit-display">
+                    <div class="bit-display-row">
+                        <span class="lbl"><span class="dot dot-hex"></span>Hex</span>
+                        <span class="val" id="hexDisplay">0x0000000000000000</span>
+                    </div>
+                    <div class="bit-display-row">
+                        <span class="lbl"><span class="dot dot-dec"></span>Dec</span>
+                        <span class="val" id="decDisplay">0</span>
+                    </div>
+                    <div class="bit-display-row">
+                        <span class="lbl"><span class="dot dot-bin"></span>Binary</span>
+                        <span class="val bin" id="binaryDisplay">0000000000000000000000000000000000000000000000000000000000000000</span>
+                    </div>
+                </div>
+
+                <div class="bit-grid" id="gridContainer"></div>
+
+                <div class="input-row">
+                    <label for="initInput">Set value:</label>
+                    <input type="text" id="initInput" placeholder="Decimal or hex (0x...)" spellcheck="false">
+                    <button class="btn-primary" id="applyBtn">Apply</button>
+                </div>
+
+                <div class="input-row">
+                    <label for="shiftAmount">Shift by:</label>
+                    <input type="number" id="shiftAmount" value="1" min="0" step="1"
+                           style="flex:0 0 100px;min-width:100px;text-align:center">
+                    <button class="btn-primary" id="shiftLeftBtn">&lt;&lt; 左移</button>
+                    <button class="btn-primary" id="shiftRightBtn">&gt;&gt; 右移</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 2：寄存器 & CSR
+             ============================================================ -->
+        <section id="panel-reg" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>🧩 寄存器转换</h1>
+                    <span class="badge">RISC‑V GPR &amp; CSR</span>
+                </div>
+
+                <div class="card-note">
+                    输入 <code>t0</code>、<code>sp</code>、<code>x5</code>、<code>31</code>、<code>fp</code> 等通用寄存器；<br>
+                    或输入 CSR 名称如 <code>satp</code>、<code>mstatus</code>，地址如 <code>0x180</code>、<code>0x300</code>。
+                </div>
+
+                <div class="input-row">
+                    <label for="regInput">输入：</label>
+                    <input type="text" id="regInput" placeholder="例如: t0, x31, fp, satp, 0x180" spellcheck="false" autofocus>
+                </div>
+
+                <div id="resultBox" class="reg-out">
+                    <span style="color:#9aabbf;font-size:16px;">等待输入…</span>
+                </div>
+
+                <div class="quick-row" id="exampleContainer">
+                    <span>t0</span><span>sp</span><span>fp</span><span>s0</span><span>a7</span>
+                    <span>x8</span><span>x31</span><span>10</span><span>zero</span>
+                    <span>satp</span><span>mstatus</span><span>0x180</span><span>0x300</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 3：指令编解码
+             ============================================================ -->
+        <section id="panel-codec" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>⚙️ 指令编解码</h1>
+                    <span class="badge">rvcodec.js</span>
+                </div>
+
+                <div class="card-note">
+                    基于 <code>rvcodec.js</code>（LupLab @ UC Davis），支持 RV32 / RV64 / RV128 与压缩指令。
+                    输入汇编指令或机器码，加载后即可查看编解码结果。
+                </div>
+
+                <div class="input-row">
+                    <label for="codecQuery">指令 / 编码：</label>
+                    <input id="codecQuery" type="text" value="blt" spellcheck="false"
+                           placeholder="例如 blt / addi / 0x00c58563 / 00000000000100100000000001100011">
+                    <button class="btn-primary" id="codecLoad">加载</button>
+                </div>
+
+                <iframe id="codecFrame" style="width:100%;height:640px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;display:block"
+                        src="https://luplab.gitlab.io/rvcodecjs/#q=blt&abi=false&isa=AUTO"
+                        title="RISC-V Instruction Encoder/Decoder"
+                        referrerpolicy="no-referrer-when-downgrade"
+                        loading="lazy"></iframe>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 4：异常 & 中断
+             ============================================================ -->
+        <section id="panel-trap" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>🚨 异常 &amp; 中断</h1>
+                    <span class="badge">mcause / scause / vscause</span>
+                </div>
+
+                <div class="card-note">
+                    <code>mcause</code> / <code>scause</code> 最高位表示陷阱类型：<b>1 = 中断</b>，<b>0 = 异常</b>，低位为编码。<br>
+                    例如 <code>0x8000000000000005</code> = 中断 5（S 定时器中断）；<code>0x000000000000000d</code> = 异常 13（Load 页错误）。点击表格行可快速解码。
+                </div>
+
+                <div class="input-row">
+                    <label for="trapSearch">筛选：</label>
+                    <input id="trapSearch" type="text" spellcheck="false"
+                           placeholder="名称 / 编码 / 说明，例如 page、0x0d、timer、ecall">
+                </div>
+
+                <div class="trap-tables">
+                    <div class="trap-table-wrap">
+                        <h3>⚠️ 异常 Exception <span class="mini">mcause[63] = 0</span></h3>
+                        <table>
+                            <thead><tr><th>编码</th><th>名称 / 说明</th></tr></thead>
+                            <tbody id="trapExcBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="trap-table-wrap">
+                        <h3>⚡ 中断 Interrupt <span class="mini">mcause[63] = 1</span></h3>
+                        <table>
+                            <thead><tr><th>编码</th><th>名称 / 说明</th></tr></thead>
+                            <tbody id="trapIntBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="input-row">
+                    <label for="causeInput">mcause 解码：</label>
+                    <input id="causeInput" type="text" spellcheck="false"
+                           placeholder="0x8000000000000005 或 5 或 0x0d">
+                    <button class="btn-primary" id="causeBtn">解码</button>
+                </div>
+
+                <div id="causeResult" class="cause-result"></div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 5：虚拟地址
+             ============================================================ -->
+        <section id="panel-vm" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>🗺️ 虚拟地址转换</h1>
+                    <span class="badge">Bare / Sv39 / Sv48 / Sv57</span>
+                </div>
+
+                <div class="card-note">
+                    选择分页模式后输入虚拟地址，按 RISC-V 标准拆解为各级 VPN 与页内偏移。
+                    <b>每个 PTE 固定 64 位（8 字节）</b>，每个页表恰有 512 项（4 KiB 一页），每级 VPN 为 9 位。
+                </div>
+
+                <div class="vm-mode-row" id="vmModeRow">
+                    <button class="mode-btn" data-mode="bare">Bare</button>
+                    <button class="mode-btn active" data-mode="sv39">Sv39</button>
+                    <button class="mode-btn" data-mode="sv48">Sv48</button>
+                    <button class="mode-btn" data-mode="sv57">Sv57</button>
+                </div>
+
+                <div class="input-row">
+                    <label for="vmAddr">虚拟地址：</label>
+                    <input id="vmAddr" type="text" value="0x0000000040302010" spellcheck="false"
+                           placeholder="0x... 或十进制">
+                </div>
+
+                <div class="input-row">
+                    <label for="vmSatp">satp PPN：</label>
+                    <input id="vmSatp" type="text" spellcheck="false"
+                           placeholder="可选，例如 0x80000（填入后显示根页表 PTE 地址）">
+                </div>
+
+                <div id="vmResult" style="margin-top:20px"></div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 6：CSR 字段展开
+             ============================================================ -->
+        <section id="panel-csr" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>📋 CSR 字段展开</h1>
+                    <span class="badge">Field Decomposer</span>
+                </div>
+
+                <div class="card-note">
+                    输入 <code>CSR 名称</code> 和 <code>数值</code>，自动展开为对应的字段（域段），
+                    显示每个字段的 <b>bit 范围</b>、<b>位宽</b>、<b>当前值</b> 及含义。非零字段高亮显示。
+                </div>
+
+                <div class="input-row">
+                    <label for="csrName">CSR：</label>
+                    <input id="csrName" type="text" list="csrDatalist" value="mstatus"
+                           placeholder="例如 mstatus、satp、mie、misa" spellcheck="false">
+                    <datalist id="csrDatalist"></datalist>
+                </div>
+
+                <div class="input-row">
+                    <label for="csrValue">数值：</label>
+                    <input id="csrValue" type="text" value="0x0000000A00000000" spellcheck="false"
+                           placeholder="0x... 或十进制或 0b...">
+                </div>
+
+                <div class="quick-row" id="csrQuick"></div>
+
+                <div id="csrResult"></div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 7：PTE 解析
+             ============================================================ -->
+        <section id="panel-pte" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>📄 PTE Entry 解析</h1>
+                    <span class="badge">Sv39 / Sv48 / Sv57 · 64-bit PTE</span>
+                </div>
+
+                <div class="card-note">
+                    输入 64 位 PTE 数值，按 RISC-V 标准展开为每个域段：
+                    <b>PPN</b>（44 位，分 PPN[2:0]）、标志位 <code>V / R / W / X / U / G / A / D</code>、
+                    <code>RSW</code>、<code>PBMT</code>、<code>N</code>。
+                </div>
+
+                <div class="input-row">
+                    <label for="pteValue">PTE 值：</label>
+                    <input id="pteValue" type="text" value="0x0000000020000CF7" spellcheck="false"
+                           placeholder="0x... 或十进制或 0b...">
+                    <button class="btn-primary" id="pteBtn">解析</button>
+                </div>
+
+                <div class="quick-row" id="pteQuick"></div>
+
+                <div id="pteResult"></div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 8：PMP 属性
+             ============================================================ -->
+        <section id="panel-pmp" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>🔒 PMP 配置寄存器</h1>
+                    <span class="badge">pmpcfg0 / pmpcfg2 (RV64)</span>
+                </div>
+
+                <div class="card-note">
+                    输入 <code>pmpcfg</code> 的 64 位数值，按 8 位一组拆分为 8 个 <code>pmpXcfg</code>。
+                    每个条目包含 <b>L</b>（锁定）、<b>A</b>（地址匹配模式）、<b>X / W / R</b> 权限。
+                </div>
+
+                <div class="input-row">
+                    <label for="pmpValue">pmpcfg 值：</label>
+                    <input id="pmpValue" type="text" value="0x00000000001F1F1F" spellcheck="false"
+                           placeholder="0x... 或十进制或 0b...">
+                    <button class="btn-primary" id="pmpBtn">解析</button>
+                </div>
+
+                <div class="input-row">
+                    <label for="pmpStart">起始编号：</label>
+                    <input id="pmpStart" type="number" value="0" min="0" max="56" step="8"
+                           style="flex:0 0 110px;min-width:110px;text-align:center">
+                </div>
+
+                <div class="quick-row" id="pmpQuick"></div>
+
+                <div id="pmpResult"></div>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             面板 9：CSR 指令识别
+             ============================================================ -->
+        <section id="panel-csrop" class="panel" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h1>🔧 CSR 指令识别</h1>
+                    <span class="badge">Zicsr · funct3 编码</span>
+                </div>
+
+                <div class="card-note">
+                    输入 CSR 指令的 <code>funct3</code>（3 位，位于指令 bit 14:12），识别对应的 CSR 指令名与语法。
+                    例如 <code>b101</code> → <b>csrrwi</b>；<code>0b010</code> → <b>csrrs</b>。
+                </div>
+
+                <div class="input-row">
+                    <label for="csrFunct3">funct3：</label>
+                    <input id="csrFunct3" type="text" value="0b101" spellcheck="false"
+                           placeholder="支持 0b101 / b101 / 101 / 5 / 0x5">
+                    <button class="btn-primary" id="csrFunct3Btn">识别</button>
+                </div>
+
+                <div class="quick-row" id="csrFunct3Quick"></div>
+
+                <div id="csrOpResult"></div>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<script>
+/* ============================================================
+   菜单切换
+   ============================================================ */
+(function () {
+    const buttons = Array.prototype.slice.call(document.querySelectorAll('.menu-btn'));
+    const panels = Array.prototype.slice.call(document.querySelectorAll('.panel'));
+
+    function activate(targetId) {
+        buttons.forEach(function (b) {
+            const on = b.dataset.target === targetId;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        panels.forEach(function (p) {
+            p.classList.toggle('active', p.id === targetId);
+        });
+        if (history.replaceState) history.replaceState(null, '', '#' + targetId);
+    }
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () { activate(this.dataset.target); });
+    });
+
+    const hash = (location.hash || '').replace('#', '');
+    if (hash && document.getElementById(hash) && document.getElementById(hash).classList.contains('panel')) {
+        activate(hash);
+    }
+})();
+
+
+/* ============================================================
+   通用工具函数
+   ============================================================ */
+const MASK64 = (1n << 64n) - 1n;
+const PPN_MASK = (1n << 44n) - 1n;
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+}
+
+function parseValue(str) {
+    str = String(str).trim().replace(/_/g, '');
+    if (str === '') return { ok: false, err: '请输入数值' };
+    try {
+        let v;
+        if (/^0[xX][0-9a-fA-F]+$/.test(str)) v = BigInt(str);
+        else if (/^0[bB][01]+$/.test(str)) v = BigInt(str);
+        else if (/^\d+$/.test(str)) v = BigInt(str);
+        else return { ok: false, err: '格式错误：请输入十进制、0x 十六进制或 0b 二进制' };
+        if (v < 0n) return { ok: false, err: '数值不能为负' };
+        if (v > MASK64) return { ok: false, err: '数值超出 64 位范围' };
+        return { ok: true, value: v };
+    } catch (e) {
+        return { ok: false, err: '无法解析该数值' };
+    }
+}
+
+function renderFieldTable(fields, value, container) {
+    let html = '<div class="field-table">';
+    html += '<div class="field-head">';
+    html += '<span>Bits</span><span>字段名</span><span>值</span><span>说明</span>';
+    html += '</div>';
+
+    fields.forEach(function (f) {
+        const width = f.hi - f.lo + 1;
+        let fval;
+        if (width >= 64) fval = value;
+        else {
+            const mask = (1n << BigInt(width)) - 1n;
+            fval = (value >> BigInt(f.lo)) & mask;
+        }
+        const isZero = (fval === 0n);
+        const rangeText = (f.hi === f.lo) ? String(f.hi) : (f.hi + ':' + f.lo);
+
+        let valDisplay;
+        if (f.fmt === 'hex' || width > 20) valDisplay = '0x' + fval.toString(16).toUpperCase();
+        else valDisplay = fval.toString();
+
+        let enumLabel = '';
+        if (f.enum && width <= 16) {
+            const key = Number(fval);
+            if (Object.prototype.hasOwnProperty.call(f.enum, key)) {
+                enumLabel = '<span class="field-enum">' + escapeHtml(f.enum[key]) + '</span>';
+            }
+        }
+
+        html += '<div class="field-row" data-zero="' + (isZero ? '1' : '0') + '" data-reserved="' + (f.reserved ? '1' : '0') + '">';
+        html += '<span class="field-range">' + rangeText + '</span>';
+        html += '<span class="field-name">' + escapeHtml(f.name) + '</span>';
+        html += '<span class="field-value">' + valDisplay + enumLabel + '</span>';
+        html += '<span class="field-desc">' + escapeHtml(f.desc) + '</span>';
+        html += '</div>';
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function renderValueBox(value) {
+    const hexStr = '0x' + value.toString(16).toUpperCase().padStart(16, '0');
+    const decStr = value.toString();
+    const binStr = value.toString(2).padStart(64, '0');
+    const binGrouped = binStr.match(/.{4}/g).join(' ');
+    let html = '<div class="value-box">';
+    html += '<div class="vb-row"><span class="vb-k">Hex</span><span class="vb-v">' + hexStr + '</span></div>';
+    html += '<div class="vb-row"><span class="vb-k">Dec</span><span class="vb-v">' + decStr + '</span></div>';
+    html += '<div class="vb-row"><span class="vb-k">Bin</span><span class="vb-v sm">' + binGrouped + '</span></div>';
+    html += '</div>';
+    return html;
+}
+
+
+/* ============================================================
+   面板 1：64-bit 位操作
+   ============================================================ */
+(function () {
+    let value = 0n;
+    const TOTAL_BITS = 64;
+
+    const hexDisplay = document.getElementById('hexDisplay');
+    const decDisplay = document.getElementById('decDisplay');
+    const binaryDisplay = document.getElementById('binaryDisplay');
+    const gridContainer = document.getElementById('gridContainer');
+    const initInput = document.getElementById('initInput');
+    const applyBtn = document.getElementById('applyBtn');
+    const shiftAmountInput = document.getElementById('shiftAmount');
+    const shiftLeftBtn = document.getElementById('shiftLeftBtn');
+    const shiftRightBtn = document.getElementById('shiftRightBtn');
+
+    let bitElements = [];
+
+    function buildGrid() {
+        gridContainer.innerHTML = '';
+        bitElements = [];
+        for (let row = 0; row < 4; row++) {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'bit-row';
+            for (let g = 0; g < 4; g++) {
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'bit-group';
+                for (let b = 0; b < 4; b++) {
+                    const globalIndex = row * 16 + g * 4 + b;
+                    const bitIndex = 63 - globalIndex;
+                    const cell = document.createElement('div');
+                    cell.className = 'bit-cell';
+                    const label = document.createElement('div');
+                    label.className = 'bit-label';
+                    label.textContent = bitIndex;
+                    const valueDiv = document.createElement('div');
+                    valueDiv.className = 'bit-val zero';
+                    valueDiv.textContent = '0';
+                    valueDiv.dataset.bit = bitIndex;
+                    valueDiv.addEventListener('click', function () {
+                        toggleBit(parseInt(this.dataset.bit, 10));
+                    });
+                    cell.appendChild(label);
+                    cell.appendChild(valueDiv);
+                    groupDiv.appendChild(cell);
+                    bitElements[bitIndex] = valueDiv;
+                }
+                rowDiv.appendChild(groupDiv);
+            }
+            gridContainer.appendChild(rowDiv);
+        }
+    }
+
+    function updateDisplay() {
+        for (let i = 0; i < TOTAL_BITS; i++) {
+            const bitVal = (value >> BigInt(i)) & 1n;
+            const el = bitElements[i];
+            if (el) {
+                el.textContent = bitVal.toString();
+                el.className = 'bit-val ' + (bitVal === 1n ? 'one' : 'zero');
+            }
+        }
+        hexDisplay.textContent = '0x' + value.toString(16).padStart(16, '0').toUpperCase();
+        decDisplay.textContent = value.toString();
+        binaryDisplay.textContent = value.toString(2).padStart(64, '0');
+    }
+
+    function toggleBit(bitIndex) {
+        value ^= (1n << BigInt(bitIndex));
+        updateDisplay();
+    }
+
+    function setValueFromInput() {
+        const raw = initInput.value.trim();
+        if (raw === '') return;
+        try {
+            let newVal;
+            if (/^0x[0-9a-fA-F]+$/.test(raw)) newVal = BigInt('0x' + raw.substring(2));
+            else newVal = BigInt(raw);
+            if (newVal < 0n) newVal = 0n;
+            if (newVal > MASK64) newVal = MASK64;
+            value = newVal;
+            updateDisplay();
+        } catch (e) {
+            alert('请输入有效的十进制或十六进制整数（十六进制请以 0x 开头）');
+        }
+    }
+
+    function performShift(direction) {
+        const raw = shiftAmountInput.value.trim();
+        if (raw === '') return;
+        let shift = parseInt(raw, 10);
+        if (isNaN(shift) || shift < 0) { alert('请输入非负整数作为移位位数'); return; }
+        shift = shift % 64;
+        if (direction === 'left') value = (value << BigInt(shift)) & MASK64;
+        else value = value >> BigInt(shift);
+        updateDisplay();
+    }
+
+    buildGrid();
+    value = 0n;
+    updateDisplay();
+    applyBtn.addEventListener('click', setValueFromInput);
+    initInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') setValueFromInput(); });
+    shiftLeftBtn.addEventListener('click', function () { performShift('left'); });
+    shiftRightBtn.addEventListener('click', function () { performShift('right'); });
+})();
+
+
+/* ============================================================
+   面板 2：寄存器 & CSR
+   ============================================================ */
+(function () {
+    const abiMap = {
+        'zero':0,'ra':1,'sp':2,'gp':3,'tp':4,'t0':5,'t1':6,'t2':7,
+        's0':8,'fp':8,'s1':9,'a0':10,'a1':11,'a2':12,'a3':13,'a4':14,
+        'a5':15,'a6':16,'a7':17,'s2':18,'s3':19,'s4':20,'s5':21,
+        's6':22,'s7':23,'s8':24,'s9':25,'s10':26,'s11':27,
+        't3':28,'t4':29,'t5':30,'t6':31
+    };
+    const xToAbi = [
+        'zero','ra','sp','gp','tp','t0','t1','t2','s0/fp','s1',
+        'a0','a1','a2','a3','a4','a5','a6','a7','s2','s3',
+        's4','s5','s6','s7','s8','s9','s10','s11','t3','t4','t5','t6'
+    ];
+    const csrNameToAddr = {
+        'fflags':'001','frm':'002','fcsr':'003','cycle':'C00','time':'C01','instret':'C02',
+        'sstatus':'100','sie':'104','stvec':'105','scounteren':'106','sscratch':'140',
+        'sepc':'141','scause':'142','stval':'143','sip':'144','satp':'180',
+        'mstatus':'300','misa':'301','medeleg':'302','mideleg':'303','mie':'304','mtvec':'305',
+        'mcounteren':'306','mscratch':'340','mepc':'341','mcause':'342','mtval':'343','mip':'344',
+        'mcycle':'B00','minstret':'B02','mhartid':'F14'
+    };
+    const csrAddrToName = {};
+    Object.keys(csrNameToAddr).forEach(function (n) { csrAddrToName[csrNameToAddr[n].toLowerCase()] = n; });
+
+    const input = document.getElementById('regInput');
+    const resultBox = document.getElementById('resultBox');
+
+    document.getElementById('exampleContainer').addEventListener('click', function (e) {
+        if (e.target.tagName === 'SPAN') {
+            input.value = e.target.textContent;
+            convert();
+            input.focus();
+            input.select();
+        }
+    });
+
+    function convert() {
+        const raw = input.value.trim();
+        if (raw === '') {
+            resultBox.className = 'reg-out';
+            resultBox.innerHTML = '<span style="color:#9aabbf;font-size:16px;">等待输入…</span>';
+            return;
+        }
+        const lower = raw.toLowerCase();
+        let html = '';
+        let isValid = false;
+
+        if (Object.prototype.hasOwnProperty.call(csrNameToAddr, lower)) {
+            const addr = csrNameToAddr[lower];
+            html = '<span class="input-val">' + lower + '</span>';
+            html += '<span class="arrow">➜</span>';
+            html += '<span class="highlight">0x' + addr.toUpperCase() + '</span>';
+            html += '<span class="tag">CSR</span>';
+            isValid = true;
+        } else if (lower.startsWith('0x')) {
+            const hexPart = lower.substring(2);
+            if (/^[0-9a-f]+$/i.test(hexPart)) {
+                const key = hexPart.toLowerCase();
+                if (Object.prototype.hasOwnProperty.call(csrAddrToName, key)) {
+                    const name = csrAddrToName[key];
+                    html = '<span class="input-val">0x' + key.toUpperCase() + '</span>';
+                    html += '<span class="arrow">➜</span>';
+                    html += '<span class="highlight">' + name + '</span>';
+                    html += '<span class="tag">CSR</span>';
+                    isValid = true;
+                } else {
+                    html = '❌ 未识别的 CSR 地址 “' + escapeHtml(raw) + '”';
+                }
+            } else {
+                html = '❌ 无效的十六进制地址 “' + escapeHtml(raw) + '”';
+            }
+        }
+
+        if (!isValid) {
+            let isGpr = false;
+            const numMatch = lower.match(/^\d+$/);
+            if (numMatch) {
+                const val = parseInt(numMatch[0], 10);
+                if (val >= 0 && val <= 31) {
+                    isGpr = true;
+                    const aliasSimple = xToAbi[val].replace('/', ' / ');
+                    html = '<span class="input-val">' + val + '</span>';
+                    html += '<span class="arrow">➜</span>';
+                    html += '<span class="highlight">x' + val + '</span>';
+                    if (aliasSimple !== 'x' + val) html += '<span class="alias">(' + aliasSimple + ')</span>';
+                } else html = '❌ 数字必须在 0 – 31 之间';
+            } else if (lower.startsWith('x')) {
+                const numPart = lower.substring(1);
+                if (/^\d+$/.test(numPart)) {
+                    const val = parseInt(numPart, 10);
+                    if (val >= 0 && val <= 31) {
+                        isGpr = true;
+                        const aliasDisplay = xToAbi[val].replace('/', ' / ');
+                        html = '<span class="input-val">x' + val + '</span>';
+                        html += '<span class="arrow">➜</span>';
+                        html += '<span class="highlight">' + aliasDisplay + '</span>';
+                    } else html = '❌ x 编号必须在 x0 – x31 之间';
+                } else html = '❌ 无效的 x 格式，请使用 x0 – x31';
+            } else if (Object.prototype.hasOwnProperty.call(abiMap, lower)) {
+                const num = abiMap[lower];
+                isGpr = true;
+                const abiName = xToAbi[num];
+                const aliasSimple = abiName.replace('/', ' / ');
+                html = '<span class="input-val">' + lower + '</span>';
+                html += '<span class="arrow">➜</span>';
+                html += '<span class="highlight">x' + num + '</span>';
+                if (lower === 'fp' || lower === 's0') html += '<span class="alias">(' + aliasSimple + ')</span>';
+                else if (aliasSimple !== lower && aliasSimple !== 'x' + num) html += '<span class="alias">(' + aliasSimple + ')</span>';
+            } else {
+                html = '❌ 未识别的寄存器或 CSR “' + escapeHtml(raw) + '”';
+            }
+            if (isGpr) isValid = true;
+        }
+
+        resultBox.className = 'reg-out' + (isValid ? '' : ' err');
+        resultBox.innerHTML = html;
+    }
+
+    input.addEventListener('input', convert);
+    input.addEventListener('blur', function () { this.value = this.value.trim(); convert(); });
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { this.value = ''; convert(); this.blur(); }
+    });
+    input.addEventListener('focus', function () { this.select(); });
+    convert();
+})();
+
+
+/* ============================================================
+   面板 3：指令编解码
+   ============================================================ */
+(function () {
+    const BASE = 'https://luplab.gitlab.io/rvcodecjs/';
+    const frame = document.getElementById('codecFrame');
+    const queryInput = document.getElementById('codecQuery');
+    const loadBtn = document.getElementById('codecLoad');
+
+    function load() {
+        const q = queryInput.value.trim();
+        const hash = q === '' ? '#abi=false&isa=AUTO' : '#q=' + encodeURIComponent(q) + '&abi=false&isa=AUTO';
+        frame.src = BASE + hash;
+    }
+    loadBtn.addEventListener('click', load);
+    queryInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); load(); }
+    });
+})();
+
+
+/* ============================================================
+   面板 4：异常 & 中断
+   ============================================================ */
+(function () {
+    const EXCEPTIONS = [
+        [0,'Instruction address misaligned','指令地址未对齐'],
+        [1,'Instruction access fault','取指访问错误'],
+        [2,'Illegal instruction','非法指令'],
+        [3,'Breakpoint','断点（EBREAK）'],
+        [4,'Load address misaligned','Load 地址未对齐'],
+        [5,'Load access fault','Load 访问错误'],
+        [6,'Store/AMO address misaligned','Store/AMO 地址未对齐'],
+        [7,'Store/AMO access fault','Store/AMO 访问错误'],
+        [8,'Environment call from U-mode','来自 U 模式的 ECALL'],
+        [9,'Environment call from S-mode','来自 S 模式的 ECALL'],
+        [10,'(Reserved)','保留'],
+        [11,'Environment call from M-mode','来自 M 模式的 ECALL'],
+        [12,'Instruction page fault','指令页错误'],
+        [13,'Load page fault','Load 页错误'],
+        [14,'(Reserved)','保留'],
+        [15,'Store/AMO page fault','Store/AMO 页错误'],
+        [16,'Double trap','双重陷入（已弃用）'],
+        [17,'(Reserved)','保留'],
+        [18,'Software check','软件检查失败'],
+        [19,'Hardware error','硬件错误'],
+        [20,'Instruction guest-page fault','指令客户页错误'],
+        [21,'Load guest-page fault','Load 客户页错误'],
+        [22,'Virtual instruction','虚拟指令'],
+        [23,'Store/AMO guest-page fault','Store/AMO 客户页错误']
+    ];
+    const INTERRUPTS = [
+        [0,'User software interrupt','用户软件中断'],
+        [1,'User timer interrupt','用户定时器中断'],
+        [2,'User external interrupt','用户外部中断'],
+        [3,'(Reserved)','保留'],
+        [4,'Supervisor software interrupt','S 模式软件中断'],
+        [5,'Supervisor timer interrupt','S 模式定时器中断'],
+        [6,'Supervisor external interrupt','S 模式外部中断'],
+        [7,'(Reserved)','保留'],
+        [8,'Machine software interrupt','M 模式软件中断'],
+        [9,'Machine timer interrupt','M 模式定时器中断'],
+        [10,'Machine external interrupt','M 模式外部中断'],
+        [11,'(Reserved)','保留'],
+        [12,'Supervisor guest external interrupt','S 模式客户外部中断'],
+        [13,'Machine guest external interrupt','M 模式客户外部中断'],
+        [14,'(Reserved)','保留'],
+        [15,'(Reserved)','保留']
+    ];
+
+    const excBody = document.getElementById('trapExcBody');
+    const intBody = document.getElementById('trapIntBody');
+    const searchEl = document.getElementById('trapSearch');
+    const causeInput = document.getElementById('causeInput');
+    const causeBtn = document.getElementById('causeBtn');
+    const causeResult = document.getElementById('causeResult');
+
+    function matches(q, code, name, desc) {
+        if (!q) return true;
+        const dec = String(code);
+        const hex = '0x' + code.toString(16);
+        const hexPad = '0x' + code.toString(16).padStart(2, '0');
+        return dec.indexOf(q) !== -1 || hex.indexOf(q) !== -1 || hexPad.indexOf(q) !== -1 ||
+               name.toLowerCase().indexOf(q) !== -1 || desc.toLowerCase().indexOf(q) !== -1;
+    }
+
+    function buildRows(tbody, list, q, isInt) {
+        tbody.innerHTML = '';
+        let shown = 0;
+        list.forEach(function (item) {
+            const code = item[0], name = item[1], desc = item[2];
+            if (!matches(q, code, name, desc)) return;
+            shown++;
+            const tr = document.createElement('tr');
+            const tdCode = document.createElement('td');
+            tdCode.className = 'code-cell';
+            tdCode.textContent = code;
+            const tdInfo = document.createElement('td');
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'trap-name';
+            nameDiv.textContent = name;
+            const descDiv = document.createElement('div');
+            descDiv.className = 'trap-desc';
+            descDiv.textContent = desc;
+            tdInfo.appendChild(nameDiv);
+            tdInfo.appendChild(descDiv);
+            tr.appendChild(tdCode);
+            tr.appendChild(tdInfo);
+            tr.addEventListener('click', function () {
+                causeInput.value = String(code);
+                decodeCause(isInt ? 'interrupt' : 'exception');
+            });
+            tbody.appendChild(tr);
+        });
+        if (shown === 0) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 2;
+            td.className = 'trap-empty';
+            td.textContent = '无匹配结果';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+        }
+    }
+
+    function render() {
+        const q = searchEl.value.trim().toLowerCase();
+        buildRows(excBody, EXCEPTIONS, q, false);
+        buildRows(intBody, INTERRUPTS, q, true);
+    }
+    searchEl.addEventListener('input', render);
+
+    function lookup(list, code) {
+        for (let i = 0; i < list.length; i++) if (list[i][0] === code) return list[i];
+        return null;
+    }
+    function showError(msg) {
+        causeResult.className = 'cause-result show err';
+        causeResult.textContent = msg;
+    }
+
+    function decodeCause(forceType) {
+        const raw = causeInput.value.trim();
+        if (raw === '') { causeResult.className = 'cause-result'; causeResult.textContent = ''; return; }
+        let v;
+        try {
+            if (/^0[xX][0-9a-fA-F]+$/.test(raw)) v = BigInt(raw);
+            else if (/^\d+$/.test(raw)) v = BigInt(raw);
+            else throw new Error('bad');
+        } catch (e) { showError('❌ 无法解析：请输入十进制或 0x 开头的十六进制数'); return; }
+
+        let isInt = false, code;
+        const BIT63 = 1n << 63n, BIT31 = 1n << 31n, BIT32 = 1n << 32n;
+        if (forceType === 'interrupt') { isInt = true; code = v; }
+        else if (forceType === 'exception') { isInt = false; code = v; }
+        else if (v >= BIT63) { isInt = true; code = v - BIT63; }
+        else if (v >= BIT31 && v < BIT32) { isInt = true; code = v - BIT31; }
+        else { isInt = false; code = v; }
+
+        if (code > 0xFFFFn) { showError('❌ 编码超出范围（0 – 65535）'); return; }
+        const codeNum = Number(code);
+        const table = isInt ? INTERRUPTS : EXCEPTIONS;
+        const found = lookup(table, codeNum);
+        const hexCode = '0x' + codeNum.toString(16).toUpperCase().padStart(2, '0');
+
+        let html = '';
+        html += '<span class="cause-type">' + (isInt ? '中断 Interrupt' : '异常 Exception') + '</span>';
+        html += '<span class="cause-code">编码 ' + codeNum + ' · ' + hexCode + '</span>';
+        if (found && found[1] !== '(Reserved)') {
+            html += '<span class="cause-name">' + escapeHtml(found[1]) + '</span>';
+            html += '<span class="cause-desc">' + escapeHtml(found[2]) + '</span>';
+        } else if (found) {
+            html += '<span class="cause-name">保留编码（Reserved）</span>';
+            html += '<span class="cause-desc">该编码在标准中保留，暂未分配用途</span>';
+        } else if (codeNum >= 32 && codeNum <= 47) {
+            html += '<span class="cause-name">自定义用途</span>';
+            html += '<span class="cause-desc">编码 32–47 保留给自定义（Custom）用途</span>';
+        } else if (codeNum >= 64) {
+            html += '<span class="cause-name">自定义用途</span>';
+            html += '<span class="cause-desc">编码 ≥ 64 保留给自定义（Custom）用途</span>';
+        } else {
+            html += '<span class="cause-name">未定义 / 保留</span>';
+            html += '<span class="cause-desc">该编码未在标准异常/中断列表中定义</span>';
+        }
+        causeResult.className = 'cause-result show';
+        causeResult.innerHTML = html;
+    }
+
+    causeBtn.addEventListener('click', function () { decodeCause(); });
+    causeInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); decodeCause(); }
+    });
+    causeInput.addEventListener('input', function () {
+        if (this.value.trim() === '') { causeResult.className = 'cause-result'; causeResult.textContent = ''; }
+    });
+    render();
+})();
+
+
+/* ============================================================
+   面板 5：虚拟地址
+   ============================================================ */
+(function () {
+    const VM_MODES = {
+        bare: { name: 'Bare', levels: 0, vaBits: 64 },
+        sv39: { name: 'Sv39', levels: 3, vaBits: 39 },
+        sv48: { name: 'Sv48', levels: 4, vaBits: 48 },
+        sv57: { name: 'Sv57', levels: 5, vaBits: 57 }
+    };
+    let currentMode = 'sv39';
+
+    const modeRow = document.getElementById('vmModeRow');
+    const vmAddrEl = document.getElementById('vmAddr');
+    const vmSatpEl = document.getElementById('vmSatp');
+    const vmResult = document.getElementById('vmResult');
+
+    function padHex(v, digits) { return v.toString(16).toUpperCase().padStart(digits, '0'); }
+    function bitsBadge(hi, lo, widthText) {
+        return '<span class="lv-bits"><span class="lv-bits-label">bits</span><span class="lv-bits-range">' +
+               hi + ':' + lo + '</span><span class="lv-bits-width">' + widthText + '</span></span>';
+    }
+
+    modeRow.addEventListener('click', function (e) {
+        const btn = e.target.closest ? e.target.closest('.mode-btn') : null;
+        if (!btn) return;
+        currentMode = btn.dataset.mode;
+        Array.prototype.forEach.call(modeRow.querySelectorAll('.mode-btn'), function (b) {
+            b.classList.toggle('active', b === btn);
+        });
+        renderVM();
+    });
+
+    function renderVM() {
+        const cfg = VM_MODES[currentMode];
+        const addrRes = parseValue(vmAddrEl.value);
+        if (!addrRes.ok) {
+            vmResult.innerHTML = '<div class="result-empty">' + (addrRes.err || '输入一个虚拟地址开始拆解') + '</div>';
+            return;
+        }
+        const va = addrRes.value;
+        const vaHexWidth = Math.ceil(cfg.vaBits / 4);
+        let html = '';
+
+        html += '<div class="summary-grid">';
+        html += '<div class="sg-item"><span class="k">模式</span><span class="v">' + cfg.name + '</span></div>';
+        html += '<div class="sg-item"><span class="k">VA 宽度</span><span class="v">' + cfg.vaBits + ' 位</span></div>';
+        html += '<div class="sg-item"><span class="k">页表级数</span><span class="v">' + (cfg.levels === 0 ? '无（直通）' : cfg.levels + ' 级') + '</span></div>';
+        html += '<div class="sg-item"><span class="k">每级 VPN</span><span class="v">9 位</span></div>';
+        html += '<div class="sg-item"><span class="k">页内偏移</span><span class="v">12 位（4 KiB）</span></div>';
+        html += '<div class="sg-item"><span class="k">PTE 大小</span><span class="v">64 位 / 8 B</span></div>';
+        html += '</div>';
+
+        if (currentMode === 'bare') {
+            html += '<div class="vm-level"><div class="vm-level-head"><span class="lv-tag">Bare</span><span class="lv-name">无分页转换</span>' + bitsBadge(63, 0, '64-bit') + '</div>';
+            html += '<div class="vm-level-grid">';
+            html += '<div class="vm-field"><span class="k">虚拟地址</span><span class="v mono">0x' + padHex(va, 16) + '</span></div>';
+            html += '<div class="vm-field"><span class="k">物理地址</span><span class="v mono">0x' + padHex(va, 16) + '（直接映射）</span></div>';
+            html += '<div class="vm-field"><span class="k">十进制</span><span class="v mono">' + va.toString() + '</span></div>';
+            html += '</div></div>';
+            html += '<div class="vm-note">Bare 模式下 <code>satp.MODE = 0</code>，不进行任何分页转换，虚拟地址直接作为物理地址使用。</div>';
+            vmResult.innerHTML = html;
+            return;
+        }
+
+        const signBitPos = cfg.vaBits - 1;
+        const signBit = (va >> BigInt(signBitPos)) & 1n;
+        const highBits = va >> BigInt(cfg.vaBits);
+        const expectedHigh = (signBit === 1n) ? ((1n << BigInt(64 - cfg.vaBits)) - 1n) : 0n;
+        const canonical = (highBits === expectedHigh);
+
+        html += '<div class="vm-level"><div class="vm-level-head"><span class="lv-tag">VA</span><span class="lv-name">虚拟地址</span>' + bitsBadge(63, 0, '64-bit') + '</div>';
+        html += '<div class="vm-level-grid">';
+        html += '<div class="vm-field"><span class="k">十六进制</span><span class="v mono">0x' + padHex(va, 16) + '</span></div>';
+        html += '<div class="vm-field"><span class="k">十进制</span><span class="v mono">' + va.toString() + '</span></div>';
+        html += '<div class="vm-field"><span class="k">低位 ' + vaHexWidth + ' 位</span><span class="v mono">0x' + padHex(va & ((1n << BigInt(cfg.vaBits)) - 1n), vaHexWidth) + '</span></div>';
+        html += '<div class="vm-field"><span class="k">符号位（位 ' + signBitPos + '）</span><span class="v mono">' + signBit.toString() + '</span></div>';
+        html += '</div></div>';
+
+        if (!canonical) {
+            html += '<div class="warn-box">⚠️ 该地址不是<b>规范地址（non-canonical）</b>。位 63:' + cfg.vaBits + ' 必须是位 ' + signBitPos + '（当前为 <code>' + signBit.toString() + '</code>）的符号扩展，但实际高位值为 <code>0x' + highBits.toString(16).toUpperCase() + '</code>，预期为 <code>0x' + expectedHigh.toString(16).toUpperCase() + '</code>。真实硬件访问该地址会触发 page fault。</div>';
+        }
+
+        for (let L = cfg.levels - 1; L >= 0; L--) {
+            const lo = 12 + 9 * L;
+            const hi = 20 + 9 * L;
+            const vpn = Number((va >> BigInt(lo)) & 0x1FFn);
+            const vpnHex = '0x' + vpn.toString(16).toUpperCase().padStart(3, '0');
+            const vpnBin = vpn.toString(2).padStart(9, '0');
+            const vpnBinSpaced = vpnBin.slice(0, 3) + ' ' + vpnBin.slice(3, 6) + ' ' + vpnBin.slice(6, 9);
+            const pteOffset = vpn * 8;
+            const isRoot = (L === cfg.levels - 1);
+
+            html += '<div class="vm-level"><div class="vm-level-head"><span class="lv-tag">Level ' + L + '</span><span class="lv-name">VPN[' + L + ']</span>' + bitsBadge(hi, lo, '9-bit');
+            if (isRoot) html += '<span class="lv-root-flag">根页表</span>';
+            html += '</div>';
+            html += '<div class="vm-level-grid">';
+            html += '<div class="vm-field"><span class="k">十进制</span><span class="v mono">' + vpn + '</span></div>';
+            html += '<div class="vm-field"><span class="k">十六进制</span><span class="v mono">' + vpnHex + '</span></div>';
+            html += '<div class="vm-field"><span class="k">二进制</span><span class="v mono">' + vpnBinSpaced + '</span></div>';
+            html += '<div class="vm-field"><span class="k">PTE 表内偏移</span><span class="v mono">' + vpn + ' × 8 = ' + pteOffset + ' B</span></div>';
+            html += '</div></div>';
+        }
+
+        const pageOffset = va & 0xFFFn;
+        const pageOffsetNum = Number(pageOffset);
+        html += '<div class="vm-level"><div class="vm-level-head"><span class="lv-tag">Offset</span><span class="lv-name">页内偏移</span>' + bitsBadge(11, 0, '12-bit') + '</div>';
+        html += '<div class="vm-level-grid">';
+        html += '<div class="vm-field"><span class="k">十进制</span><span class="v mono">' + pageOffsetNum + '</span></div>';
+        html += '<div class="vm-field"><span class="k">十六进制</span><span class="v mono">0x' + pageOffsetNum.toString(16).toUpperCase().padStart(3, '0') + '</span></div>';
+        html += '<div class="vm-field"><span class="k">二进制</span><span class="v mono">' + pageOffsetNum.toString(2).padStart(12, '0') + '</span></div>';
+        html += '</div></div>';
+
+        const satpRes = parseValue(vmSatpEl.value);
+        let pteNote = '';
+        if (satpRes.ok) {
+            const ppn = satpRes.value & PPN_MASK;
+            const rootBase = ppn << 12n;
+            const rootLevel = cfg.levels - 1;
+            const rootVpn = Number((va >> BigInt(12 + 9 * rootLevel)) & 0x1FFn);
+            const rootPteAddr = rootBase + BigInt(rootVpn * 8);
+            pteNote += '已知 <code>satp.PPN = 0x' + ppn.toString(16).toUpperCase() + '</code>，根页表基址 = <code>0x' + rootBase.toString(16).toUpperCase() + '</code>。<br>';
+            pteNote += '第 ' + rootLevel + ' 级（根）页表中，条目索引为 ' + rootVpn + '，对应 <b>PTE 地址 = 0x' + rootPteAddr.toString(16).toUpperCase() + '</b>（基址 + ' + rootVpn + ' × 8）。';
+        } else if (vmSatpEl.value.trim() !== '') {
+            pteNote += '⚠️ satp PPN 输入无效：' + escapeHtml(satpRes.err) + '<br>';
+        } else {
+            pteNote += '每一级 PTE 的表内偏移 = VPN[L] × 8 字节（见上方）。<br>若在“satp PPN”框中填入根页表物理页号，可进一步算出根页表 PTE 的物理地址。';
+        }
+        html += '<div class="vm-note">' + pteNote + '</div>';
+        vmResult.innerHTML = html;
+    }
+
+    vmAddrEl.addEventListener('input', renderVM);
+    vmSatpEl.addEventListener('input', renderVM);
+    renderVM();
+})();
+
+
+/* ============================================================
+   面板 6：CSR 字段展开
+   ============================================================ */
+(function () {
+    const CSR_DEFS = {
+        mstatus: {
+            title: '机器模式状态寄存器', desc: 'Machine Status',
+            fields: [
+                { hi:63, lo:63, name:'SD', desc:'状态脏位：FS/VS/XS 任一为 Dirty 时置 1' },
+                { hi:62, lo:40, name:'WPRI', desc:'保留', reserved:true },
+                { hi:39, lo:39, name:'MPV', desc:'M 模式先前虚拟化（H 扩展）' },
+                { hi:38, lo:38, name:'GVA', desc:'陷入时 stval 为客户虚拟地址' },
+                { hi:37, lo:37, name:'MBE', desc:'M 模式内存大端序' },
+                { hi:36, lo:36, name:'SBE', desc:'S 模式内存大端序' },
+                { hi:35, lo:34, name:'SXL', desc:'S 模式 XLEN', enum:{0:'保留',1:'32',2:'64',3:'128'} },
+                { hi:33, lo:32, name:'UXL', desc:'U 模式 XLEN', enum:{0:'保留',1:'32',2:'64',3:'128'} },
+                { hi:31, lo:23, name:'WPRI', desc:'保留', reserved:true },
+                { hi:22, lo:22, name:'TSR', desc:'SRET 陷入' },
+                { hi:21, lo:21, name:'TW', desc:'超时等待' },
+                { hi:20, lo:20, name:'TVM', desc:'虚拟内存管理陷入' },
+                { hi:19, lo:19, name:'MXR', desc:'允许读取可执行页' },
+                { hi:18, lo:18, name:'SUM', desc:'允许 S 模式访问 U 模式内存' },
+                { hi:17, lo:17, name:'MPRV', desc:'修改特权级' },
+                { hi:16, lo:15, name:'XS', desc:'额外状态', enum:{0:'Off',1:'Initial',2:'Clean',3:'Dirty'} },
+                { hi:14, lo:13, name:'FS', desc:'浮点单元状态', enum:{0:'Off',1:'Initial',2:'Clean',3:'Dirty'} },
+                { hi:12, lo:11, name:'MPP', desc:'M 模式先前特权级', enum:{0:'U',1:'S',2:'保留',3:'M'} },
+                { hi:10, lo:9, name:'VS', desc:'向量单元状态', enum:{0:'Off',1:'Initial',2:'Clean',3:'Dirty'} },
+                { hi:8, lo:8, name:'SPP', desc:'S 模式先前特权级', enum:{0:'U',1:'S'} },
+                { hi:7, lo:7, name:'MPIE', desc:'M 模式先前中断使能' },
+                { hi:6, lo:6, name:'UBE', desc:'U 模式大端序' },
+                { hi:5, lo:5, name:'SPIE', desc:'S 模式先前中断使能' },
+                { hi:4, lo:4, name:'WPRI', desc:'保留', reserved:true },
+                { hi:3, lo:3, name:'MIE', desc:'M 模式全局中断使能' },
+                { hi:2, lo:2, name:'WPRI', desc:'保留', reserved:true },
+                { hi:1, lo:1, name:'SIE', desc:'S 模式全局中断使能' },
+                { hi:0, lo:0, name:'WPRI', desc:'保留', reserved:true }
+            ]
+        },
+        sstatus: {
+            title: 'S 模式状态寄存器', desc: 'Supervisor Status',
+            fields: [
+                { hi:63, lo:63, name:'SD', desc:'状态脏位' },
+                { hi:62, lo:39, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:38, lo:38, name:'GVA', desc:'陷入时 stval 为客户虚拟地址' },
+                { hi:37, lo:36, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:35, lo:34, name:'SXL', desc:'S 模式 XLEN', enum:{0:'保留',1:'32',2:'64',3:'128'} },
+                { hi:33, lo:32, name:'UXL', desc:'U 模式 XLEN', enum:{0:'保留',1:'32',2:'64',3:'128'} },
+                { hi:31, lo:20, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:19, lo:19, name:'MXR', desc:'允许读取可执行页' },
+                { hi:18, lo:18, name:'SUM', desc:'允许 S 模式访问 U 模式内存' },
+                { hi:17, lo:17, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:16, lo:15, name:'XS', desc:'额外状态', enum:{0:'Off',1:'Initial',2:'Clean',3:'Dirty'} },
+                { hi:14, lo:13, name:'FS', desc:'浮点单元状态', enum:{0:'Off',1:'Initial',2:'Clean',3:'Dirty'} },
+                { hi:12, lo:11, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:10, lo:9, name:'VS', desc:'向量单元状态', enum:{0:'Off',1:'Initial',2:'Clean',3:'Dirty'} },
+                { hi:8, lo:8, name:'SPP', desc:'S 模式先前特权级', enum:{0:'U',1:'S'} },
+                { hi:7, lo:6, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:5, lo:5, name:'SPIE', desc:'S 模式先前中断使能' },
+                { hi:4, lo:2, name:'—', desc:'（sstatus 视图中不存在）', reserved:true },
+                { hi:1, lo:1, name:'SIE', desc:'S 模式全局中断使能' },
+                { hi:0, lo:0, name:'—', desc:'（sstatus 视图中不存在）', reserved:true }
+            ]
+        },
+        misa: {
+            title: '机器模式 ISA 寄存器', desc: 'Machine ISA Register',
+            fields: [
+                { hi:63, lo:62, name:'MXL', desc:'机器模式 XLEN', enum:{1:'32',2:'64',3:'128'} },
+                { hi:61, lo:26, name:'—', desc:'保留', reserved:true },
+                { hi:25, lo:25, name:'Z', desc:'扩展 Z', reserved:true },
+                { hi:24, lo:24, name:'Y', desc:'扩展 Y', reserved:true },
+                { hi:23, lo:23, name:'X', desc:'非标准扩展' },
+                { hi:22, lo:22, name:'W', desc:'扩展 W', reserved:true },
+                { hi:21, lo:21, name:'V', desc:'向量扩展' },
+                { hi:20, lo:20, name:'U', desc:'用户模式' },
+                { hi:19, lo:19, name:'T', desc:'事务内存', reserved:true },
+                { hi:18, lo:18, name:'S', desc:'监督模式' },
+                { hi:17, lo:17, name:'R', desc:'扩展 R', reserved:true },
+                { hi:16, lo:16, name:'Q', desc:'四精度浮点' },
+                { hi:15, lo:15, name:'P', desc:'打包 SIMD' },
+                { hi:14, lo:14, name:'O', desc:'扩展 O', reserved:true },
+                { hi:13, lo:13, name:'N', desc:'用户级中断' },
+                { hi:12, lo:12, name:'M', desc:'整数乘除' },
+                { hi:11, lo:11, name:'L', desc:'十进制浮点', reserved:true },
+                { hi:10, lo:10, name:'K', desc:'扩展 K', reserved:true },
+                { hi:9, lo:9, name:'J', desc:'动态翻译', reserved:true },
+                { hi:8, lo:8, name:'I', desc:'基础整数' },
+                { hi:7, lo:7, name:'H', desc:'虚拟化' },
+                { hi:6, lo:6, name:'G', desc:'= IMAFD + Zicsr + Zifencei' },
+                { hi:5, lo:5, name:'F', desc:'单精度浮点' },
+                { hi:4, lo:4, name:'E', desc:'RV32E' },
+                { hi:3, lo:3, name:'D', desc:'双精度浮点' },
+                { hi:2, lo:2, name:'C', desc:'压缩指令' },
+                { hi:1, lo:1, name:'B', desc:'位操作' },
+                { hi:0, lo:0, name:'A', desc:'原子操作' }
+            ]
+        },
+        mie: {
+            title: '机器模式中断使能寄存器', desc: 'Machine Interrupt Enable',
+            fields: [
+                { hi:63, lo:13, name:'—', desc:'保留', reserved:true },
+                { hi:12, lo:12, name:'SGEIE', desc:'S 模式客户外部中断使能' },
+                { hi:11, lo:11, name:'MEIE', desc:'M 模式外部中断使能' },
+                { hi:10, lo:10, name:'VSEIE', desc:'虚拟 S 模式外部中断使能' },
+                { hi:9, lo:9, name:'SEIE', desc:'S 模式外部中断使能' },
+                { hi:8, lo:8, name:'UEIE', desc:'U 模式外部中断使能' },
+                { hi:7, lo:7, name:'MTIE', desc:'M 模式定时器中断使能' },
+                { hi:6, lo:6, name:'VSTIE', desc:'虚拟 S 模式定时器中断使能' },
+                { hi:5, lo:5, name:'STIE', desc:'S 模式定时器中断使能' },
+                { hi:4, lo:4, name:'UTIE', desc:'U 模式定时器中断使能' },
+                { hi:3, lo:3, name:'MSIE', desc:'M 模式软件中断使能' },
+                { hi:2, lo:2, name:'VSSIE', desc:'虚拟 S 模式软件中断使能' },
+                { hi:1, lo:1, name:'SSIE', desc:'S 模式软件中断使能' },
+                { hi:0, lo:0, name:'USIE', desc:'U 模式软件中断使能' }
+            ]
+        },
+        mip: {
+            title: '机器模式中断等待寄存器', desc: 'Machine Interrupt Pending',
+            fields: [
+                { hi:63, lo:13, name:'—', desc:'保留', reserved:true },
+                { hi:12, lo:12, name:'SGEIP', desc:'S 模式客户外部中断挂起' },
+                { hi:11, lo:11, name:'MEIP', desc:'M 模式外部中断挂起' },
+                { hi:10, lo:10, name:'VSEIP', desc:'虚拟 S 模式外部中断挂起' },
+                { hi:9, lo:9, name:'SEIP', desc:'S 模式外部中断挂起' },
+                { hi:8, lo:8, name:'UEIP', desc:'U 模式外部中断挂起' },
+                { hi:7, lo:7, name:'MTIP', desc:'M 模式定时器中断挂起' },
+                { hi:6, lo:6, name:'VSTIP', desc:'虚拟 S 模式定时器中断挂起' },
+                { hi:5, lo:5, name:'STIP', desc:'S 模式定时器中断挂起' },
+                { hi:4, lo:4, name:'UTIP', desc:'U 模式定时器中断挂起' },
+                { hi:3, lo:3, name:'MSIP', desc:'M 模式软件中断挂起' },
+                { hi:2, lo:2, name:'VSSIP', desc:'虚拟 S 模式软件中断挂起' },
+                { hi:1, lo:1, name:'SSIP', desc:'S 模式软件中断挂起' },
+                { hi:0, lo:0, name:'USIP', desc:'U 模式软件中断挂起' }
+            ]
+        },
+        medeleg: {
+            title: '机器模式异常委托寄存器', desc: 'Machine Exception Delegation',
+            fields: (function () {
+                const names = ['指令地址未对齐','指令访问错误','非法指令','断点','Load 地址未对齐','Load 访问错误','Store/AMO 地址未对齐','Store/AMO 访问错误','来自 U 模式的 ECALL','来自 S 模式的 ECALL','保留','来自 M 模式的 ECALL','指令页错误','Load 页错误','保留','Store/AMO 页错误','双重陷入','保留','软件检查','硬件错误','指令客户页错误','Load 客户页错误','虚拟指令','Store/AMO 客户页错误'];
+                const arr = [];
+                for (let i = 23; i >= 0; i--) {
+                    arr.push({ hi:i, lo:i, name:'E' + i, desc: names[i], reserved: names[i] === '保留' });
+                }
+                arr.push({ hi:63, lo:24, name:'—', desc:'保留（bit ≥ 24）', reserved:true });
+                return arr;
+            })()
+        },
+        mideleg: {
+            title: '机器模式中断委托寄存器', desc: 'Machine Interrupt Delegation',
+            fields: (function () {
+                const names = ['U 软件','U 定时器','U 外部','保留','S 软件','S 定时器','S 外部','保留','M 软件','M 定时器','M 外部','保留','S 客户外部','M 客户外部','保留','保留'];
+                const arr = [];
+                for (let i = 15; i >= 0; i--) {
+                    arr.push({ hi:i, lo:i, name:'I' + i, desc: names[i], reserved: names[i] === '保留' });
+                }
+                arr.push({ hi:63, lo:16, name:'—', desc:'保留（bit ≥ 16）', reserved:true });
+                return arr;
+            })()
+        },
+        mtvec: {
+            title: '机器模式陷阱向量基址寄存器', desc: 'Machine Trap-Vector Base-Address',
+            fields: [
+                { hi:63, lo:2, name:'BASE', desc:'陷阱向量基址（4 字节对齐）', fmt:'hex' },
+                { hi:1, lo:0, name:'MODE', desc:'向量模式', enum:{0:'Direct',1:'Vectored',2:'保留',3:'保留'} }
+            ]
+        },
+        stvec: {
+            title: 'S 模式陷阱向量基址寄存器', desc: 'Supervisor Trap-Vector Base-Address',
+            fields: [
+                { hi:63, lo:2, name:'BASE', desc:'陷阱向量基址（4 字节对齐）', fmt:'hex' },
+                { hi:1, lo:0, name:'MODE', desc:'向量模式', enum:{0:'Direct',1:'Vectored',2:'保留',3:'保留'} }
+            ]
+        },
+        mepc: {
+            title: '机器模式异常程序计数器', desc: 'Machine Exception Program Counter',
+            fields: [
+                { hi:63, lo:1, name:'PC', desc:'异常发生时的指令地址（bit 0 恒为 0）', fmt:'hex' },
+                { hi:0, lo:0, name:'—', desc:'恒为 0', reserved:true }
+            ]
+        },
+        sepc: {
+            title: 'S 模式异常程序计数器', desc: 'Supervisor Exception Program Counter',
+            fields: [
+                { hi:63, lo:1, name:'PC', desc:'异常发生时的指令地址（bit 0 恒为 0）', fmt:'hex' },
+                { hi:0, lo:0, name:'—', desc:'恒为 0', reserved:true }
+            ]
+        },
+        mcause: {
+            title: '机器模式陷阱原因寄存器', desc: 'Machine Cause',
+            fields: [
+                { hi:63, lo:63, name:'Interrupt', desc:'陷阱类型', enum:{0:'异常',1:'中断'} },
+                { hi:62, lo:0, name:'Code', desc:'异常/中断编码（详见「异常 & 中断」面板）' }
+            ]
+        },
+        scause: {
+            title: 'S 模式陷阱原因寄存器', desc: 'Supervisor Cause',
+            fields: [
+                { hi:63, lo:63, name:'Interrupt', desc:'陷阱类型', enum:{0:'异常',1:'中断'} },
+                { hi:62, lo:0, name:'Code', desc:'异常/中断编码（详见「异常 & 中断」面板）' }
+            ]
+        },
+        mtval: {
+            title: '机器模式陷阱值寄存器', desc: 'Machine Trap Value',
+            fields: [{ hi:63, lo:0, name:'VALUE', desc:'异常相关的附加信息', fmt:'hex' }]
+        },
+        stval: {
+            title: 'S 模式陷阱值寄存器', desc: 'Supervisor Trap Value',
+            fields: [{ hi:63, lo:0, name:'VALUE', desc:'异常相关的附加信息', fmt:'hex' }]
+        },
+        mscratch: {
+            title: '机器模式暂存寄存器', desc: 'Machine Scratch',
+            fields: [{ hi:63, lo:0, name:'VALUE', desc:'读写暂存值', fmt:'hex' }]
+        },
+        sscratch: {
+            title: 'S 模式暂存寄存器', desc: 'Supervisor Scratch',
+            fields: [{ hi:63, lo:0, name:'VALUE', desc:'读写暂存值', fmt:'hex' }]
+        },
+        satp: {
+            title: 'S 模式地址转换与保护寄存器', desc: 'Supervisor Address Translation and Protection (RV64)',
+            fields: [
+                { hi:63, lo:60, name:'MODE', desc:'分页模式', enum:{0:'Bare',8:'Sv39',9:'Sv48',10:'Sv57',11:'Sv64'} },
+                { hi:59, lo:44, name:'ASID', desc:'地址空间标识符（16 位）' },
+                { hi:43, lo:0, name:'PPN', desc:'根页表物理页号（44 位）', fmt:'hex' }
+            ]
+        },
+        mhartid: {
+            title: '机器模式 Hart ID 寄存器', desc: 'Machine Hart ID（只读）',
+            fields: [{ hi:63, lo:0, name:'HARTID', desc:'当前 hart 的硬件线程 ID', fmt:'hex' }]
+        },
+        mcounteren: {
+            title: '机器模式计数器使能寄存器', desc: 'Machine Counter Enable',
+            fields: [
+                { hi:63, lo:32, name:'—', desc:'保留', reserved:true },
+                { hi:31, lo:3, name:'HPM', desc:'硬件性能监视器使能位（HPM3–HPM31）' },
+                { hi:2, lo:2, name:'IR', desc:'允许 U 模式读取 instret' },
+                { hi:1, lo:1, name:'TM', desc:'允许 U 模式读取 time' },
+                { hi:0, lo:0, name:'CY', desc:'允许 U 模式读取 cycle' }
+            ]
+        },
+        scounteren: {
+            title: 'S 模式计数器使能寄存器', desc: 'Supervisor Counter Enable',
+            fields: [
+                { hi:63, lo:32, name:'—', desc:'保留', reserved:true },
+                { hi:31, lo:3, name:'HPM', desc:'硬件性能监视器使能位' },
+                { hi:2, lo:2, name:'IR', desc:'允许 U 模式读取 instret' },
+                { hi:1, lo:1, name:'TM', desc:'允许 U 模式读取 time' },
+                { hi:0, lo:0, name:'CY', desc:'允许 U 模式读取 cycle' }
+            ]
+        },
+        fcsr: {
+            title: '浮点控制和状态寄存器', desc: 'Floating-Point Control and Status',
+            fields: [
+                { hi:63, lo:8, name:'—', desc:'保留', reserved:true },
+                { hi:7, lo:5, name:'FRM', desc:'浮点舍入模式', enum:{0:'RNE',1:'RTZ',2:'RDN',3:'RUP',4:'RMM',5:'保留',6:'保留',7:'保留'} },
+                { hi:4, lo:0, name:'FFLAGS', desc:'浮点异常标志（NV/DZ/OF/UF/NX）' }
+            ]
+        },
+        frm: {
+            title: '浮点舍入模式寄存器', desc: 'Floating-Point Rounding Mode',
+            fields: [
+                { hi:63, lo:3, name:'—', desc:'保留', reserved:true },
+                { hi:2, lo:0, name:'FRM', desc:'浮点舍入模式', enum:{0:'RNE',1:'RTZ',2:'RDN',3:'RUP',4:'RMM',5:'保留',6:'保留',7:'保留'} }
+            ]
+        },
+        fflags: {
+            title: '浮点异常标志寄存器', desc: 'Floating-Point Exception Flags',
+            fields: [
+                { hi:63, lo:5, name:'—', desc:'保留', reserved:true },
+                { hi:4, lo:4, name:'NV', desc:'无效运算' },
+                { hi:3, lo:3, name:'DZ', desc:'除以零' },
+                { hi:2, lo:2, name:'OF', desc:'上溢' },
+                { hi:1, lo:1, name:'UF', desc:'下溢' },
+                { hi:0, lo:0, name:'NX', desc:'不精确' }
+            ]
+        }
+    };
+
+    const csrNameInput = document.getElementById('csrName');
+    const csrValueInput = document.getElementById('csrValue');
+    const csrResult = document.getElementById('csrResult');
+    const csrQuick = document.getElementById('csrQuick');
+    const csrDatalist = document.getElementById('csrDatalist');
+
+    Object.keys(CSR_DEFS).forEach(function (name) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        csrDatalist.appendChild(opt);
+    });
+
+    ['mstatus','sstatus','misa','mie','mip','medeleg','mideleg','mtvec','stvec','mepc','sepc','mcause','scause','mtval','stval','mscratch','sscratch','satp','mhartid','mcounteren','scounteren','fcsr','fflags','frm'].forEach(function (name) {
+        const span = document.createElement('span');
+        span.textContent = name;
+        span.addEventListener('click', function () {
+            csrNameInput.value = name;
+            renderCSR();
+        });
+        csrQuick.appendChild(span);
+    });
+
+    function renderCSR() {
+        const name = csrNameInput.value.trim().toLowerCase();
+        if (name === '') {
+            csrResult.innerHTML = '<div class="result-empty">输入 CSR 名称开始展开</div>';
+            return;
+        }
+        const def = CSR_DEFS[name];
+        if (!def) {
+            csrResult.innerHTML = '<div class="result-error">❌ 未识别的 CSR 名称：' + escapeHtml(name) + '（可点击上方「快速选择」查看支持的 CSR）</div>';
+            return;
+        }
+        const valRes = parseValue(csrValueInput.value);
+        if (!valRes.ok) {
+            csrResult.innerHTML = '<div class="result-error">❌ ' + escapeHtml(valRes.err) + '</div>';
+            return;
+        }
+        const value = valRes.value;
+
+        let html = '';
+        html += '<div class="result-head">';
+        html += '<span class="rh-name">' + escapeHtml(name) + '</span>';
+        html += '<span class="rh-title">' + escapeHtml(def.title) + ' · ' + escapeHtml(def.desc) + '</span>';
+        html += '</div>';
+        html += renderValueBox(value);
+
+        const tmp = document.createElement('div');
+        renderFieldTable(def.fields, value, tmp);
+        html += tmp.innerHTML;
+
+        csrResult.innerHTML = html;
+    }
+
+    csrNameInput.addEventListener('input', renderCSR);
+    csrValueInput.addEventListener('input', renderCSR);
+    renderCSR();
+})();
+
+
+/* ============================================================
+   面板 7：PTE 解析
+   ============================================================ */
+(function () {
+    const PTE_FIELDS = [
+        { hi:63, lo:63, name:'N', desc:'Svnapot 扩展：1 表示该 PTE 指向 NAPOT 连续页' },
+        { hi:62, lo:61, name:'PBMT', desc:'页基内存类型（Page-Based Memory Type）',
+          enum:{0:'PMA（按物理内存属性）', 1:'NC（非缓存）', 2:'IO（I/O 映射）', 3:'保留'} },
+        { hi:60, lo:54, name:'Reserved', desc:'保留（必须为 0）', reserved:true },
+        { hi:53, lo:28, name:'PPN[2]', desc:'物理页号第 2 部分（26 位）', fmt:'hex' },
+        { hi:27, lo:19, name:'PPN[1]', desc:'物理页号第 1 部分（9 位）', fmt:'hex' },
+        { hi:18, lo:10, name:'PPN[0]', desc:'物理页号第 0 部分（9 位）', fmt:'hex' },
+        { hi:9, lo:8, name:'RSW', desc:'保留给软件使用（2 位，RISC-V 标准未定义）' },
+        { hi:7, lo:7, name:'D', desc:'脏位：1 表示页已被写过（Dirty）' },
+        { hi:6, lo:6, name:'A', desc:'访问位：1 表示页已被访问过（Accessed）' },
+        { hi:5, lo:5, name:'G', desc:'全局映射：1 表示全局页（Global）' },
+        { hi:4, lo:4, name:'U', desc:'用户模式可访问（User）' },
+        { hi:3, lo:3, name:'X', desc:'可执行（Execute）' },
+        { hi:2, lo:2, name:'W', desc:'可写（Write）' },
+        { hi:1, lo:1, name:'R', desc:'可读（Read）' },
+        { hi:0, lo:0, name:'V', desc:'有效位：0 表示该 PTE 无效（Valid）' }
+    ];
+
+    const pteValue = document.getElementById('pteValue');
+    const pteBtn = document.getElementById('pteBtn');
+    const pteResult = document.getElementById('pteResult');
+    const pteQuick = document.getElementById('pteQuick');
+
+    ['0x0000000020000CF7','0x00000000200004C7','0x0000000020000000','0x0000000000000000','0x0000000020000CDF'].forEach(function (v) {
+        const span = document.createElement('span');
+        span.textContent = v;
+        span.addEventListener('click', function () { pteValue.value = v; renderPTE(); });
+        pteQuick.appendChild(span);
+    });
+
+    function renderPTE() {
+        const res = parseValue(pteValue.value);
+        if (!res.ok) {
+            pteResult.innerHTML = '<div class="result-error">❌ ' + escapeHtml(res.err) + '</div>';
+            return;
+        }
+        const v = res.value;
+
+        const V = Number((v >> 0n) & 1n);
+        const R = Number((v >> 1n) & 1n);
+        const W = Number((v >> 2n) & 1n);
+        const X = Number((v >> 3n) & 1n);
+        const U = Number((v >> 4n) & 1n);
+        const G = Number((v >> 5n) & 1n);
+        const A = Number((v >> 6n) & 1n);
+        const D = Number((v >> 7n) & 1n);
+
+        const ppn2 = (v >> 28n) & ((1n << 26n) - 1n);
+        const ppn1 = (v >> 19n) & ((1n << 9n) - 1n);
+        const ppn0 = (v >> 10n) & ((1n << 9n) - 1n);
+        const ppn = (ppn2 << 18n) | (ppn1 << 9n) | ppn0;
+        const pa = ppn << 12n;
+
+        let pteType, pteTypeDesc;
+        if (V === 0) {
+            pteType = '无效';
+            pteTypeDesc = 'V = 0，该 PTE 无效，访问会触发 page fault';
+        } else if (R === 0 && W === 1) {
+            pteType = '保留（非法）';
+            pteTypeDesc = 'R = 0 且 W = 1 是保留组合，属于非法 PTE';
+        } else if (R === 0 && W === 0 && X === 0) {
+            pteType = '非叶子';
+            pteTypeDesc = '指向下一级页表（中间节点）';
+        } else {
+            pteType = '叶子';
+            const perms = [];
+            if (R) perms.push('R');
+            if (W) perms.push('W');
+            if (X) perms.push('X');
+            if (U) perms.push('U');
+            pteTypeDesc = '叶子 PTE，权限：' + perms.join(' / ');
+        }
+
+        let html = '';
+        html += '<div class="result-head">';
+        html += '<span class="rh-name">PTE</span>';
+        html += '<span class="rh-title">' + pteType + ' · ' + escapeHtml(pteTypeDesc) + '</span>';
+        html += '</div>';
+        html += renderValueBox(v);
+
+        html += '<div class="summary-grid">';
+        html += '<div class="sg-item"><span class="k">PPN 合计</span><span class="v">0x' + ppn.toString(16).toUpperCase() + '</span></div>';
+        html += '<div class="sg-item"><span class="k">物理页基址</span><span class="v">0x' + pa.toString(16).toUpperCase() + '</span></div>';
+        html += '<div class="sg-item"><span class="k">PTE 类型</span><span class="v">' + pteType + '</span></div>';
+        html += '<div class="sg-item"><span class="k">权限</span><span class="v">' +
+                (R ? 'R ' : '') + (W ? 'W ' : '') + (X ? 'X ' : '') + (U ? 'U ' : '') + (G ? 'G ' : '') +
+                (R || W || X || U || G ? '' : '（无）') + '</span></div>';
+        html += '</div>';
+
+        const tmp = document.createElement('div');
+        renderFieldTable(PTE_FIELDS, v, tmp);
+        html += tmp.innerHTML;
+
+        let note = '';
+        if (V === 0) {
+            note = '该 PTE 无效，硬件访问会触发 page fault。';
+        } else if (R === 0 && W === 1) {
+            note = 'R = 0 且 W = 1 是保留组合，属于非法 PTE，硬件访问会触发 page fault。';
+        } else if (R === 0 && W === 0 && X === 0) {
+            note = '非叶子 PTE：硬件会继续遍历下一级页表，其 PPN 指向下一级页表的物理基址。';
+        } else {
+            note = '叶子 PTE：硬件完成地址转换，物理地址 = (PPN << 12) | VA[11:0]。';
+        }
+        html += '<div class="vm-note">' + note + '</div>';
+
+        pteResult.innerHTML = html;
+    }
+
+    pteBtn.addEventListener('click', renderPTE);
+    pteValue.addEventListener('input', renderPTE);
+    renderPTE();
+})();
+
+
+/* ============================================================
+   面板 8：PMP 属性
+   ============================================================ */
+(function () {
+    const PMP_CFG_FIELDS = [
+        { hi:7, lo:7, name:'L', desc:'锁定：1 时该 PMP 条目及其关联地址寄存器被锁定，直到复位' },
+        { hi:6, lo:5, name:'Reserved', desc:'保留（必须为 0）', reserved:true },
+        { hi:4, lo:3, name:'A', desc:'地址匹配模式',
+          enum:{0:'OFF（关闭匹配）', 1:'TOR（顶部范围匹配）', 2:'NA4（自然对齐 4 字节）', 3:'NAPOT（自然对齐 2 的幂）'} },
+        { hi:2, lo:2, name:'X', desc:'可执行（Execute）' },
+        { hi:1, lo:1, name:'W', desc:'可写（Write）' },
+        { hi:0, lo:0, name:'R', desc:'可读（Read）' }
+    ];
+
+    const pmpValue = document.getElementById('pmpValue');
+    const pmpBtn = document.getElementById('pmpBtn');
+    const pmpResult = document.getElementById('pmpResult');
+    const pmpQuick = document.getElementById('pmpQuick');
+    const pmpStart = document.getElementById('pmpStart');
+
+    ['0x00000000001F1F1F','0x0000000000000000','0x000000001F000000','0x9F9F9F9F9F9F9F9F'].forEach(function (v) {
+        const span = document.createElement('span');
+        span.textContent = v;
+        span.addEventListener('click', function () { pmpValue.value = v; renderPMP(); });
+        pmpQuick.appendChild(span);
+    });
+
+    function renderPMP() {
+        const res = parseValue(pmpValue.value);
+        if (!res.ok) {
+            pmpResult.innerHTML = '<div class="result-error">❌ ' + escapeHtml(res.err) + '</div>';
+            return;
+        }
+        const v = res.value;
+
+        let start = parseInt(pmpStart.value, 10);
+        if (isNaN(start) || start < 0) start = 0;
+        if (start > 56) start = 56;
+        if (start % 8 !== 0) start = Math.floor(start / 8) * 8;
+
+        let html = '';
+        html += '<div class="result-head">';
+        html += '<span class="rh-name">pmpcfg</span>';
+        html += '<span class="rh-title">8 个 pmpXcfg 条目（pmp' + start + 'cfg – pmp' + (start + 7) + 'cfg）</span>';
+        html += '</div>';
+        html += renderValueBox(v);
+
+        for (let i = 0; i < 8; i++) {
+            const shift = BigInt(8 * i);
+            const byteVal = (v >> shift) & 0xFFn;
+            const idx = start + i;
+
+            const R = Number(byteVal & 1n);
+            const W = Number((byteVal >> 1n) & 1n);
+            const X = Number((byteVal >> 2n) & 1n);
+            const A = Number((byteVal >> 3n) & 3n);
+            const L = Number((byteVal >> 7n) & 1n);
+
+            const aNames = ['OFF', 'TOR', 'NA4', 'NAPOT'];
+            const perms = [];
+            if (R) perms.push('R');
+            if (W) perms.push('W');
+            if (X) perms.push('X');
+            const permsStr = perms.length ? perms.join(' / ') : '无权限';
+
+            html += '<div class="vm-level">';
+            html += '<div class="vm-level-head">';
+            html += '<span class="lv-tag">pmp' + idx + 'cfg</span>';
+            html += '<span class="lv-name">0x' + byteVal.toString(16).toUpperCase().padStart(2, '0') + '</span>';
+            html += '<span style="font-size:13px;color:#64748b;font-weight:600;font-family:\'SF Mono\',monospace;">' +
+                    'A=' + aNames[A] + ' · ' + permsStr + (L ? ' · LOCKED' : '') + '</span>';
+            html += '</div>';
+
+            html += '<div class="field-table" style="margin-bottom:0">';
+            html += '<div class="field-head"><span>Bits</span><span>字段名</span><span>值</span><span>说明</span></div>';
+
+            PMP_CFG_FIELDS.forEach(function (f) {
+                const width = f.hi - f.lo + 1;
+                const mask = (1n << BigInt(width)) - 1n;
+                const fval = (byteVal >> BigInt(f.lo)) & mask;
+                const isZero = (fval === 0n);
+                const rangeText = (f.hi === f.lo) ? String(f.hi) : (f.hi + ':' + f.lo);
+                let valDisplay = fval.toString();
+                let enumLabel = '';
+                if (f.enum && width <= 4) {
+                    const key = Number(fval);
+                    if (Object.prototype.hasOwnProperty.call(f.enum, key)) {
+                        enumLabel = '<span class="field-enum">' + escapeHtml(f.enum[key]) + '</span>';
+                    }
+                }
+                html += '<div class="field-row" data-zero="' + (isZero ? '1' : '0') + '" data-reserved="' + (f.reserved ? '1' : '0') + '">';
+                html += '<span class="field-range">' + rangeText + '</span>';
+                html += '<span class="field-name">' + escapeHtml(f.name) + '</span>';
+                html += '<span class="field-value">' + valDisplay + enumLabel + '</span>';
+                html += '<span class="field-desc">' + escapeHtml(f.desc) + '</span>';
+                html += '</div>';
+            });
+
+            html += '</div>';
+            html += '</div>';
+        }
+
+        html += '<div class="vm-note">';
+        html += '每个 <code>pmpXcfg</code> 为 8 位。<b>A</b> 字段决定地址匹配模式：' +
+                '<code>OFF</code> 关闭匹配；<code>TOR</code> 与 <code>pmpaddr</code> 配合表示顶部范围；' +
+                '<code>NA4</code> 表示自然对齐 4 字节；<code>NAPOT</code> 表示自然对齐 2 的幂范围。<br>' +
+                '<b>L</b> = 1 时该条目被锁定，写入无效。<br>' +
+                'RV64 中 <code>pmpcfg0</code> 对应 pmp0–pmp7，<code>pmpcfg2</code> 对应 pmp8–pmp15（pmpcfg1/pmpcfg3 保留）。';
+        html += '</div>';
+
+        pmpResult.innerHTML = html;
+    }
+
+    pmpBtn.addEventListener('click', renderPMP);
+    pmpValue.addEventListener('input', renderPMP);
+    pmpStart.addEventListener('input', renderPMP);
+    renderPMP();
+})();
+
+
+/* ============================================================
+   面板 9：CSR 指令识别
+   ============================================================ */
+(function () {
+    const CSR_OPS = {
+        0: null,
+        1: {
+            name: 'csrrw',
+            syntax: 'csrrw rd, csr, rs1',
+            type: 'reg',
+            typeName: '寄存器',
+            desc: '原子读/写 CSR。将 CSR 旧值读入 rd，再将 rs1 写入 CSR。',
+            detail: 'rd ≠ x0：t = CSR; CSR = rs1; rd = t<br>' +
+                    'rd = x0：CSR = rs1（不读取）'
+        },
+        2: {
+            name: 'csrrs',
+            syntax: 'csrrs rd, csr, rs1',
+            type: 'reg',
+            typeName: '寄存器',
+            desc: '原子读并置位 CSR。将 CSR 旧值读入 rd，再将 rs1 中的位在 CSR 中置 1。',
+            detail: 'rd ≠ x0：t = CSR; CSR = t | rs1; rd = t<br>' +
+                    'rs1 = x0：不写 CSR（仅读取）'
+        },
+        3: {
+            name: 'csrrc',
+            syntax: 'csrrc rd, csr, rs1',
+            type: 'reg',
+            typeName: '寄存器',
+            desc: '原子读并清位 CSR。将 CSR 旧值读入 rd，再将 rs1 中的位在 CSR 中清 0。',
+            detail: 'rd ≠ x0：t = CSR; CSR = t & ~rs1; rd = t<br>' +
+                    'rs1 = x0：不写 CSR（仅读取）'
+        },
+        4: null,
+        5: {
+            name: 'csrrwi',
+            syntax: 'csrrwi rd, csr, uimm',
+            type: 'imm',
+            typeName: '立即数',
+            desc: '原子读/写 CSR（立即数版本）。将 CSR 旧值读入 rd，再将 5 位零扩展立即数 uimm 写入 CSR。',
+            detail: 'rd ≠ x0：t = CSR; CSR = zext(uimm); rd = t<br>' +
+                    'rd = x0：CSR = zext(uimm)'
+        },
+        6: {
+            name: 'csrrsi',
+            syntax: 'csrrsi rd, csr, uimm',
+            type: 'imm',
+            typeName: '立即数',
+            desc: '原子读并置位 CSR（立即数版本）。将 CSR 旧值读入 rd，再将 uimm 中的位在 CSR 中置 1。',
+            detail: 'rd ≠ x0：t = CSR; CSR = t | zext(uimm); rd = t<br>' +
+                    'uimm = 0：不写 CSR（仅读取）'
+        },
+        7: {
+            name: 'csrrci',
+            syntax: 'csrrci rd, csr, uimm',
+            type: 'imm',
+            typeName: '立即数',
+            desc: '原子读并清位 CSR（立即数版本）。将 CSR 旧值读入 rd，再将 uimm 中的位在 CSR 中清 0。',
+            detail: 'rd ≠ x0：t = CSR; CSR = t & ~zext(uimm); rd = t<br>' +
+                    'uimm = 0：不写 CSR（仅读取）'
+        }
+    };
+
+    const REF_ROWS = [
+        { v: 0, name: '—',     desc: '保留（Reserved）' },
+        { v: 1, name: 'csrrw', desc: '原子读/写 CSR（寄存器 rs1）' },
+        { v: 2, name: 'csrrs', desc: '原子读并置位 CSR（寄存器 rs1）' },
+        { v: 3, name: 'csrrc', desc: '原子读并清位 CSR（寄存器 rs1）' },
+        { v: 4, name: '—',     desc: '保留（Reserved）' },
+        { v: 5, name: 'csrrwi', desc: '原子读/写 CSR（立即数 uimm）' },
+        { v: 6, name: 'csrrsi', desc: '原子读并置位 CSR（立即数 uimm）' },
+        { v: 7, name: 'csrrci', desc: '原子读并清位 CSR（立即数 uimm）' }
+    ];
+
+    const inputEl  = document.getElementById('csrFunct3');
+    const resultEl = document.getElementById('csrOpResult');
+    const quickEl  = document.getElementById('csrFunct3Quick');
+
+    ['0b001','0b010','0b011','0b101','0b110','0b111','0b000','0b100'].forEach(function (v) {
+        const span = document.createElement('span');
+        span.textContent = v;
+        span.addEventListener('click', function () {
+            inputEl.value = v;
+            render();
+        });
+        quickEl.appendChild(span);
+    });
+
+    function parseFunc3(str) {
+        str = String(str).trim().replace(/\s/g, '').replace(/_/g, '');
+        if (str === '') return { ok: false, err: '' };
+
+        let v = null;
+        if (/^0[bB][01]+$/.test(str))          v = parseInt(str.slice(2), 2);
+        else if (/^[bB][01]+$/.test(str))      v = parseInt(str.slice(1), 2);
+        else if (/^0[xX][0-9a-fA-F]+$/.test(str)) v = parseInt(str.slice(2), 16);
+        else if (/^[01]+$/.test(str))          v = parseInt(str, 2);
+        else if (/^\d+$/.test(str))            v = parseInt(str, 10);
+        else return { ok: false, err: '格式错误：请输入 3 位二进制（如 0b101、b101、101）或十进制 / 十六进制' };
+
+        if (isNaN(v) || v < 0 || v > 7) {
+            return { ok: false, err: 'func3 必须为 0 – 7（3 位编码）' };
+        }
+        return { ok: true, value: v };
+    }
+
+    function renderRefTable(activeV) {
+        let html = '<div class="field-table" style="margin-top:18px">';
+        html += '<div class="field-head" style="grid-template-columns: 100px 110px 1fr;">';
+        html += '<span>funct3</span><span>指令</span><span>说明</span>';
+        html += '</div>';
+
+        REF_ROWS.forEach(function (r) {
+            const isActive   = (activeV === r.v);
+            const isReserved = (r.name === '—');
+            const zeroAttr   = isActive ? '0' : '1';
+            const resvAttr   = (isReserved && !isActive) ? '1' : '0';
+
+            html += '<div class="field-row" ' +
+                    'style="grid-template-columns: 100px 110px 1fr;" ' +
+                    'data-zero="' + zeroAttr + '" data-reserved="' + resvAttr + '">';
+            html += '<span class="field-range">0b' + r.v.toString(2).padStart(3, '0') + '</span>';
+            html += '<span class="field-name">' + r.name + '</span>';
+            html += '<span class="field-desc">' + r.desc + '</span>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function render() {
+        const raw = inputEl.value.trim();
+
+        if (raw === '') {
+            resultEl.innerHTML = '<div class="result-empty">输入 func3 值开始识别</div>' + renderRefTable(null);
+            return;
+        }
+
+        const res = parseFunc3(raw);
+        if (!res.ok) {
+            resultEl.innerHTML = '<div class="result-error">❌ ' + escapeHtml(res.err) + '</div>' + renderRefTable(null);
+            return;
+        }
+
+        const v = res.value;
+        const op = CSR_OPS[v];
+        let html = '';
+
+        if (!op) {
+            html += '<div class="result-error">' +
+                    '❌ func3 = 0b' + v.toString(2).padStart(3, '0') + '（' + v + '）是保留编码，无对应的 CSR 指令' +
+                    '</div>';
+        } else {
+            html += '<div class="result-head">';
+            html += '<span class="rh-name">' + op.name + '</span>';
+            html += '<span class="rh-title">' + op.typeName + '版本 · Zicsr 指令</span>';
+            html += '</div>';
+
+            html += '<div class="value-box">';
+            html += '<div class="vb-row"><span class="vb-k">funct3</span>' +
+                    '<span class="vb-v">0b' + v.toString(2).padStart(3, '0') +
+                    '  (0x' + v.toString(16).toUpperCase() + ' · ' + v + ')</span></div>';
+            html += '<div class="vb-row"><span class="vb-k">语法</span>' +
+                    '<span class="vb-v">' + escapeHtml(op.syntax) + '</span></div>';
+            html += '<div class="vb-row"><span class="vb-k">操作数</span>' +
+                    '<span class="vb-v">' + (op.type === 'reg' ? 'rs1（寄存器）' : 'uimm[4:0]（5 位立即数）') + '</span></div>';
+            html += '<div class="vb-row"><span class="vb-k">位置</span>' +
+                    '<span class="vb-v">指令 bit 14:12</span></div>';
+            html += '</div>';
+
+            html += '<div class="vm-note">' +
+                    '<b>功能</b>　' + escapeHtml(op.desc) + '<br><br>' +
+                    '<b>操作语义</b><br>' + op.detail +
+                    '</div>';
+        }
+
+        html += renderRefTable(v);
+        resultEl.innerHTML = html;
+    }
+
+    inputEl.addEventListener('input', render);
+    inputEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); render(); }
+    });
+    document.getElementById('csrFunct3Btn').addEventListener('click', render);
+
+    render();
+})();
+
+</script>
+
+</body>
+</html>
